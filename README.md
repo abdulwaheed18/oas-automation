@@ -73,10 +73,16 @@ java -jar target/oas-automation.jar
 ```
 Then open **http://localhost:8080**.
 
-Sample specs are included in [`samples/`](samples) — the **same spec in both formats**
-([`petstore.yaml`](samples/petstore.yaml) and [`petstore.json`](samples/petstore.json)) — to try the
-flow. **Both YAML and JSON OpenAPI documents are supported** on every source (file upload, clipboard
-paste, and the `openapi.yaml`/`openapi.json` inside a Nexus ZIP); the format is auto-detected.
+Sample specs are included in [`samples/`](samples) to try the flow:
+[`petstore.yaml`](samples/petstore.yaml), [`petstore.json`](samples/petstore.json), and a
+Swagger 2.0 example [`petstore-swagger2.json`](samples/petstore-swagger2.json).
+
+**Supported spec formats/versions** (auto-detected on every source — file upload, clipboard paste,
+and the spec inside a Nexus ZIP):
+
+- **OpenAPI 3.x** in **YAML or JSON**
+- **Swagger / OpenAPI 2.0** (`"swagger": "2.0"`) in YAML or JSON — transparently converted to
+  OpenAPI 3.0 before test-case generation.
 
 ---
 

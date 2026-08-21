@@ -35,6 +35,22 @@ class TestCaseGenerationTest {
     }
 
     @Test
+    void parsesSwagger2SpecViaConversion() throws Exception {
+        String json = Files.readString(Path.of("samples/petstore-swagger2.json"));
+        OpenAPI api = parser.parse(json).getOpenAPI();
+        // A Swagger 2.0 doc is converted to OpenAPI 3.x internally.
+        assertThat(api.getOpenapi()).startsWith("3.");
+        List<EndpointInfo> endpoints = parser.listEndpoints(api);
+        assertThat(endpoints).extracting(EndpointInfo::key)
+                .contains("GET /pets", "POST /pets");
+
+        // Generation still works on the converted model.
+        List<TestCase> cases = generator.generate(api, List.of("POST /pets"));
+        assertThat(cases).anyMatch(c -> "POSITIVE".equals(c.category));
+        assertThat(cases).anyMatch(c -> "BODY".equals(c.category) && "name".equals(c.negativeField));
+    }
+
+    @Test
     void parsesJsonSpecToo() throws Exception {
         OpenAPI api = loadSampleJson();
         List<EndpointInfo> endpoints = parser.listEndpoints(api);
