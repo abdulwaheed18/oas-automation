@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>OAS Automation Test Suite</title>
+    <link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+<header class="app-header">
+    <div class="brand">
+        <div class="brand-mark" id="brandMark">OA</div>
+        <div>
+            <h1 id="appName">OAS Automation Test Suite</h1>
+            <p id="tagline">Validate that your gateway enforces the OpenAPI contract</p>
+        </div>
+    </div>
+    <div class="company" id="company"></div>
+</header>
+
+<nav class="stepper" id="stepper">
+    <div class="step active" data-step="1"><span>1</span> Spec &amp; Source</div>
+    <div class="step" data-step="2"><span>2</span> Choose Endpoints</div>
+    <div class="step" data-step="3"><span>3</span> Test Cases &amp; Run</div>
+    <div class="step" data-step="4"><span>4</span> Results</div>
+</nav>
+
+<main>
+    <!-- ============ STEP 1 ============ -->
+    <section class="panel" id="panel-1">
+        <h2>API details &amp; spec source</h2>
+        <div class="grid-2">
+            <label>API Name *
+                <input type="text" id="apiName" placeholder="e.g. Customer Orders API"/>
+            </label>
+            <label>API Version
+                <input type="text" id="apiVersion" placeholder="e.g. v1 / 1.2.0"/>
+            </label>
+        </div>
+
+        <label class="block-label">OAS file source</label>
+        <div class="source-tabs">
+            <button type="button" class="src-tab active" data-src="FILE">YAML / JSON file</button>
+            <button type="button" class="src-tab" data-src="CLIPBOARD">Paste from clipboard</button>
+            <button type="button" class="src-tab" data-src="NEXUS">Nexus ZIP URL</button>
+        </div>
+
+        <div class="src-body" id="src-FILE">
+            <input type="file" id="specFile" accept=".yaml,.yml,.json"/>
+            <p class="hint">Upload an OpenAPI 3.x document (YAML or JSON).</p>
+        </div>
+        <div class="src-body hidden" id="src-CLIPBOARD">
+            <textarea id="specContent" rows="10" placeholder="Paste the full openapi.yaml / openapi.json content here…"></textarea>
+        </div>
+        <div class="src-body hidden" id="src-NEXUS">
+            <input type="text" id="nexusUrl" placeholder="https://nexus.company.com/repository/.../artifact.zip"/>
+            <p class="hint">The ZIP is downloaded, extracted, and the <code>openapi.yaml</code> inside it is read automatically.</p>
+        </div>
+
+        <label class="block-label">Notes (optional)
+            <textarea id="note" rows="3" placeholder="Any extra context for this run — ticket number, environment, known caveats… Included in the downloaded report."></textarea>
+        </label>
+
+        <div class="actions">
+            <button class="btn primary" id="btnParse">Next: read endpoints →</button>
+        </div>
+        <div class="msg" id="msg-1"></div>
+    </section>
+
+    <!-- ============ STEP 2 ============ -->
+    <section class="panel hidden" id="panel-2">
+        <h2>Choose endpoints to test</h2>
+        <p class="sub" id="specSummary"></p>
+        <div class="toolbar">
+            <button class="btn ghost" id="selectAll">Select all</button>
+            <button class="btn ghost" id="selectNone">Clear</button>
+            <span class="count" id="epCount"></span>
+        </div>
+        <div id="endpointList" class="endpoint-list"></div>
+        <div class="actions">
+            <button class="btn ghost" data-goto="1">← Back</button>
+            <button class="btn primary" id="btnGenerate">Next: generate test cases →</button>
+        </div>
+        <div class="msg" id="msg-2"></div>
+    </section>
+
+    <!-- ============ STEP 3 ============ -->
+    <section class="panel hidden" id="panel-3">
+        <h2>Generated test cases</h2>
+        <p class="sub" id="caseSummary"></p>
+        <div class="grid-2">
+            <label>Target base URL *
+                <input type="text" id="targetBaseUrl" placeholder="https://gateway.company.com/my-api"/>
+            </label>
+            <label>Bearer token
+                <input type="password" id="bearerToken" placeholder="Paste the JWT / bearer token (no 'Bearer ' prefix)"/>
+            </label>
+        </div>
+        <p class="hint">Requests hit <code>target base URL</code> + endpoint path. TLS certificate errors are ignored for the target.</p>
+
+        <div id="caseGroups" class="case-groups"></div>
+
+        <div class="actions">
+            <button class="btn ghost" data-goto="2">← Back</button>
+            <button class="btn primary" id="btnExecute">Execute all test cases ▶</button>
+        </div>
+        <div class="msg" id="msg-3"></div>
+    </section>
+
+    <!-- ============ STEP 4 ============ -->
+    <section class="panel hidden" id="panel-4">
+        <h2>Results</h2>
+        <div class="summary-cards" id="summaryCards"></div>
+        <div class="toolbar">
+            <label class="filter">Filter:
+                <select id="resultFilter">
+                    <option value="ALL">All</option>
+                    <option value="FAIL">Failures only</option>
+                    <option value="PASS">Passes only</option>
+                    <option value="ERROR">Errors only</option>
+                </select>
+            </label>
+            <button class="btn primary" id="btnReport">⬇ Download report (HTML)</button>
+        </div>
+        <div id="resultList" class="result-list"></div>
+        <div class="actions">
+            <button class="btn ghost" data-goto="3">← Back to test cases</button>
+            <button class="btn ghost" id="btnRestart">Start over</button>
+        </div>
+    </section>
+</main>
+
+<footer class="app-footer">
+    <span id="footerCompany"></span>
+    <span id="footerContact"></span>
+</footer>
+
+<div class="overlay hidden" id="overlay">
+    <div class="spinner"></div>
+    <p id="overlayText">Working…</p>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

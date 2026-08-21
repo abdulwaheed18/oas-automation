@@ -1,0 +1,21 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+
+# Local tooling downloaded for builds
+claude-tools/
