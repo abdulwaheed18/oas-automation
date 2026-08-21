@@ -29,6 +29,32 @@ class TestCaseGenerationTest {
         return parser.parse(yaml).getOpenAPI();
     }
 
+    private OpenAPI loadSampleJson() throws Exception {
+        String json = Files.readString(Path.of("samples/petstore.json"));
+        return parser.parse(json).getOpenAPI();
+    }
+
+    @Test
+    void parsesJsonSpecToo() throws Exception {
+        OpenAPI api = loadSampleJson();
+        List<EndpointInfo> endpoints = parser.listEndpoints(api);
+        assertThat(endpoints).extracting(EndpointInfo::key)
+                .contains("GET /pets", "POST /pets", "GET /pets/{petId}");
+    }
+
+    @Test
+    void yamlAndJsonProduceTheSameEndpointsAndCases() throws Exception {
+        List<EndpointInfo> fromYaml = parser.listEndpoints(loadSample());
+        List<EndpointInfo> fromJson = parser.listEndpoints(loadSampleJson());
+        assertThat(fromJson).extracting(EndpointInfo::key)
+                .containsExactlyInAnyOrderElementsOf(
+                        fromYaml.stream().map(EndpointInfo::key).toList());
+
+        int yamlCases = generator.generate(loadSample(), List.of("POST /pets")).size();
+        int jsonCases = generator.generate(loadSampleJson(), List.of("POST /pets")).size();
+        assertThat(jsonCases).isEqualTo(yamlCases);
+    }
+
     @Test
     void parsesEndpoints() throws Exception {
         OpenAPI api = loadSample();

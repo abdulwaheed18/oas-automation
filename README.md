@@ -73,7 +73,10 @@ java -jar target/oas-automation.jar
 ```
 Then open **http://localhost:8080**.
 
-A sample spec is included at [`samples/petstore.yaml`](samples/petstore.yaml) to try the flow.
+Sample specs are included in [`samples/`](samples) — the **same spec in both formats**
+([`petstore.yaml`](samples/petstore.yaml) and [`petstore.json`](samples/petstore.json)) — to try the
+flow. **Both YAML and JSON OpenAPI documents are supported** on every source (file upload, clipboard
+paste, and the `openapi.yaml`/`openapi.json` inside a Nexus ZIP); the format is auto-detected.
 
 ---
 
