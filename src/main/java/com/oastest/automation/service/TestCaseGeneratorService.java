@@ -176,6 +176,15 @@ public class TestCaseGeneratorService {
             setExpect(malformed, Expect.REJECT);
             sink.add(malformed);
 
+            if ("application/json".equals(body.mediaType)) {
+                TestCase wrongCt = base(method, path, "BODY", "Unsupported Content-Type (text/plain)", "<body>",
+                        "Send a valid JSON body but declare Content-Type: text/plain.",
+                        secured, params, body, counter);
+                wrongCt.contentType = "text/plain";
+                setExpect(wrongCt, Expect.REJECT);
+                sink.add(wrongCt);
+            }
+
             TestCase wrongRootArray = base(method, path, "BODY", "Wrong root type (array for object)", "<body>",
                     "Send a JSON array where an object is expected.", secured, params, body, counter);
             wrongRootArray.body = "[]";
@@ -398,9 +407,13 @@ public class TestCaseGeneratorService {
         List<?> enums = schema.getEnum();
         if (enums != null && !enums.isEmpty()) {
             out.add(new Violation("value not in enum", "___not_in_enum___", Expect.REJECT));
+            addEnumCaseVariant(out, enums);
         }
         if ("integer".equals(type) || "number".equals(type)) {
             out.add(new Violation("non-numeric value", "not-a-number", Expect.REJECT));
+            if ("integer".equals(type)) {
+                out.add(new Violation("decimal for integer", "1.5", Expect.REJECT));
+            }
             if (schema.getMinimum() != null) {
                 out.add(new Violation("below minimum", schema.getMinimum().subtract(BigDecimal.ONE).toString(), Expect.REJECT));
                 out.add(new Violation("minimum boundary (valid)", schema.getMinimum().toString(), Expect.SUCCESS));
@@ -414,9 +427,7 @@ public class TestCaseGeneratorService {
         } else if ("boolean".equals(type)) {
             out.add(new Violation("non-boolean value", "notaboolean", Expect.REJECT));
         } else { // string and other on-the-wire values
-            if (schema.getPattern() != null) {
-                out.add(new Violation("pattern violation w/ special chars", "@@@!!!___###", Expect.REJECT));
-            }
+            addPatternViolation(out, schema.getPattern());
             if (schema.getMinLength() != null && schema.getMinLength() > 0) {
                 out.add(new Violation("below minLength", "", Expect.REJECT));
             }
@@ -451,9 +462,13 @@ public class TestCaseGeneratorService {
         List<?> enums = schema.getEnum();
         if (enums != null && !enums.isEmpty()) {
             out.add(new Violation("value not in enum", "___not_in_enum___", Expect.REJECT));
+            addEnumCaseVariant(out, enums);
         }
         if ("integer".equals(type) || "number".equals(type)) {
             out.add(new Violation("wrong type (string for number)", "not-a-number", Expect.REJECT));
+            if ("integer".equals(type)) {
+                out.add(new Violation("decimal for integer", new BigDecimal("1.5"), Expect.REJECT));
+            }
             if (schema.getMinimum() != null) {
                 out.add(new Violation("below minimum", schema.getMinimum().subtract(BigDecimal.ONE), Expect.REJECT));
                 out.add(new Violation("minimum boundary (valid)", schema.getMinimum(), Expect.SUCCESS));
@@ -464,15 +479,15 @@ public class TestCaseGeneratorService {
             }
         } else if ("boolean".equals(type)) {
             out.add(new Violation("wrong type (string for boolean)", "maybe", Expect.REJECT));
+            out.add(new Violation("wrong type (number for boolean)", 1, Expect.REJECT));
         } else if ("array".equals(type)) {
             out.add(new Violation("wrong type (string for array)", "not-an-array", Expect.REJECT));
+            addArrayViolations(out, schema);
         } else if ("object".equals(type)) {
             out.add(new Violation("wrong type (string for object)", "not-an-object", Expect.REJECT));
         } else { // string
             out.add(new Violation("wrong type (number for string)", 1234567, Expect.REJECT));
-            if (schema.getPattern() != null) {
-                out.add(new Violation("pattern violation w/ special chars", "@@@!!!___###", Expect.REJECT));
-            }
+            addPatternViolation(out, schema.getPattern());
             if (schema.getMinLength() != null && schema.getMinLength() > 0) {
                 out.add(new Violation("below minLength", "", Expect.REJECT));
             }
@@ -491,6 +506,68 @@ public class TestCaseGeneratorService {
             out.add(new Violation("XSS string", XSS, Expect.NO_5XX));
         }
         return out;
+    }
+
+    /**
+     * Adds a pattern-violating value, but only if one can actually be found — a permissive pattern
+     * like {@code .*} matches everything, so there is no meaningful violation to send.
+     */
+    private void addPatternViolation(List<Violation> out, String pattern) {
+        if (pattern == null) {
+            return;
+        }
+        for (String candidate : new String[]{"@@@!!!___###", "", "   ", "___lower___", "1"}) {
+            if (!RegexSampler.matchesFully(pattern, candidate)) {
+                out.add(new Violation("pattern violation (" + describe(candidate) + ")", candidate, Expect.REJECT));
+                return;
+            }
+        }
+    }
+
+    /** For a string enum, sends the first value in the wrong case (enums are case-sensitive). */
+    private void addEnumCaseVariant(List<Violation> out, List<?> enums) {
+        Object first = enums.get(0);
+        if (!(first instanceof String s) || s.isEmpty()) {
+            return;
+        }
+        String flipped = s.equals(s.toLowerCase()) ? s.toUpperCase() : s.toLowerCase();
+        if (flipped.equals(s)) {
+            return; // no letters to flip
+        }
+        for (Object e : enums) {
+            if (flipped.equals(e)) {
+                return; // the flipped value is itself a valid enum member
+            }
+        }
+        out.add(new Violation("enum value with wrong case (" + flipped + ")", flipped, Expect.REJECT));
+    }
+
+    @SuppressWarnings("rawtypes")
+    private void addArrayViolations(List<Violation> out, Schema schema) {
+        Schema items = schema.getItems();
+        Object itemSample = items != null ? SchemaSampler.valid(items) : "x";
+        if (schema.getMinItems() != null && schema.getMinItems() > 0) {
+            out.add(new Violation("empty array (below minItems)", new java.util.ArrayList<>(), Expect.REJECT));
+        }
+        if (schema.getMaxItems() != null) {
+            java.util.List<Object> tooMany = new java.util.ArrayList<>();
+            for (int k = 0; k < schema.getMaxItems() + 1; k++) {
+                tooMany.add(itemSample);
+            }
+            out.add(new Violation("too many items (above maxItems)", tooMany, Expect.REJECT));
+        }
+        // Wrong item type: object items get a string, otherwise an object.
+        String itemType = SchemaSampler.type(items);
+        Object wrongItem = "object".equals(itemType) || "array".equals(itemType)
+                ? "wrong-item-type" : java.util.Map.of("wrong", true);
+        out.add(new Violation("array with wrong item type", java.util.List.of(wrongItem), Expect.REJECT));
+    }
+
+    private String describe(String s) {
+        if (s.isEmpty()) {
+            return "empty";
+        }
+        return s.isBlank() ? "whitespace" : s;
     }
 
     // ---------------------------------------------------------------------

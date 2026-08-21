@@ -101,6 +101,14 @@ public final class SchemaSampler {
     }
 
     private static Object validString(Schema schema) {
+        // A pattern is the most specific constraint — honour it first so the valid baseline actually
+        // matches (e.g. "[A-Z0-9]{3}" -> "AAA", not "sample").
+        if (schema.getPattern() != null) {
+            String matched = RegexSampler.sample(schema.getPattern());
+            if (matched != null) {
+                return matched;
+            }
+        }
         String format = schema.getFormat();
         if (format != null) {
             switch (format) {

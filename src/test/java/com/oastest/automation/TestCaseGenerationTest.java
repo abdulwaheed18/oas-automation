@@ -149,6 +149,45 @@ class TestCaseGenerationTest {
     }
 
     @Test
+    void regexSamplerProducesMatchingValues() {
+        for (String pattern : new String[]{"[A-Z0-9]{3}", "[a-z]{2,5}", "\\d{4}", "[A-Za-z0-9_-]+",
+                "PRE-[0-9]{3}", "(cat|dog|bird)", "[A-Z]{2}\\d{2}"}) {
+            String s = com.oastest.automation.service.RegexSampler.sample(pattern);
+            assertThat(s).as("sample for %s", pattern).isNotNull();
+            assertThat(s).matches(pattern);
+        }
+    }
+
+    @Test
+    void patternedFieldGetsAValidMatchingBaseline() throws Exception {
+        String yaml = """
+                openapi: 3.0.3
+                info: { title: Pat, version: 1.0.0 }
+                paths:
+                  /x:
+                    get:
+                      parameters:
+                        - name: X-Code
+                          in: header
+                          required: true
+                          schema: { type: string, pattern: '[A-Z0-9]{3}' }
+                      responses:
+                        '200': { description: OK }
+                """;
+        OpenAPI api = parser.parse(yaml).getOpenAPI();
+        List<TestCase> cases = generator.generate(api, List.of("GET /x"));
+
+        // The positive baseline header value must satisfy the pattern.
+        TestCase positive = cases.stream().filter(c -> "POSITIVE".equals(c.category)).findFirst().orElseThrow();
+        assertThat(positive.headers.get("X-Code")).matches("[A-Z0-9]{3}");
+
+        // A pattern-violation negative should still be generated (its value must NOT match).
+        TestCase patCase = cases.stream()
+                .filter(c -> c.name.toLowerCase().contains("pattern violation")).findFirst().orElseThrow();
+        assertThat(patCase.headers.get("X-Code")).doesNotMatch("[A-Z0-9]{3}");
+    }
+
+    @Test
     void statusMatcherHandlesListsAndRanges() {
         assertThat(com.oastest.automation.service.StatusMatcher.matches("200,201,202,204", 201)).isTrue();
         assertThat(com.oastest.automation.service.StatusMatcher.matches("400-499", 422)).isTrue();

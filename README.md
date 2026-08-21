@@ -49,7 +49,12 @@ with **exactly one** thing made invalid — so a failure points at a single root
 | **Headers** (required) | missing; type / enum / pattern / length / format violations; SQL-injection & XSS robustness probes |
 | **Query params** (required) | missing; type / enum / range / length / format violations; numeric overflow; boundary-valid (min/max); injection & XSS probes |
 | **Path params** | type / format / range violations; path-traversal, injection & XSS probes |
-| **Request body** | missing body, malformed JSON, wrong root type (array/string for object), empty `{}`, missing each required field, `null` for required field, wrong type, enum, pattern (special chars), min/max length, min/max value, boundary-valid values, unexpected extra field, injection & XSS probes |
+| **Request body** | missing body, malformed JSON, unsupported Content-Type, wrong root type (array/string for object), empty `{}`, missing each required field, `null` for required field, wrong type, decimal-for-integer, number-for-boolean, enum (incl. wrong-case), pattern (special chars), min/max length, min/max value, boundary-valid values, array min/maxItems & wrong item type, unexpected extra field, injection & XSS probes |
+
+**Regex-aware valid values.** When a field declares a `pattern` (e.g. a header of `[A-Z0-9]{3}`),
+the valid baseline is generated to actually **match** that pattern (so the positive case is not
+falsely rejected), and the pattern-violation negative is only added when a genuinely non-matching
+value can be produced.
 
 Each case carries an **expected set of status codes** (see below). Validation negatives expect a
 **4xx**; auth negatives expect **401/403**; robustness probes (injection/XSS/traversal) expect
