@@ -6,6 +6,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -67,11 +68,15 @@ public class TestExecutionService {
 
         long start = System.currentTimeMillis();
         try {
-            HttpRequest httpRequest = buildRequest(base, bearerToken, tc);
+            Map<String, String> sentHeaders = effectiveHeaders(bearerToken, tc);
+            String url = base + tc.requestPath;
+            r.curl = buildCurl(url, tc, sentHeaders);
+            HttpRequest httpRequest = buildRequest(url, tc, sentHeaders);
             HttpResponse<String> response = http.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             r.latencyMs = System.currentTimeMillis() - start;
             r.actualStatus = response.statusCode();
             r.responseSnippet = snippet(response.body());
+            r.responseHeaders = renderResponseHeaders(response);
             evaluate(r, tc);
         } catch (Exception e) {
             r.latencyMs = System.currentTimeMillis() - start;
@@ -107,41 +112,71 @@ public class TestExecutionService {
         }
     }
 
-    private HttpRequest buildRequest(String base, String bearerToken, TestCase tc) {
-        HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(URI.create(base + tc.requestPath))
-                .timeout(Duration.ofSeconds(30));
-
-        for (Map.Entry<String, String> h : tc.headers.entrySet()) {
-            builder.header(h.getKey(), h.getValue());
+    /** All headers actually put on the wire, in a stable order (Authorization/Content-Type included). */
+    private Map<String, String> effectiveHeaders(String bearerToken, TestCase tc) {
+        Map<String, String> headers = new LinkedHashMap<>();
+        if (tc.headers != null) {
+            headers.putAll(tc.headers);
         }
-
         switch (tc.authMode == null ? "NONE" : tc.authMode) {
             case "VALID" -> {
                 if (bearerToken != null && !bearerToken.isBlank()) {
-                    builder.header("Authorization", "Bearer " + bearerToken.trim());
+                    headers.put("Authorization", "Bearer " + bearerToken.trim());
                 }
             }
             case "OVERRIDE" -> {
                 if (tc.authorization != null) {
-                    builder.header("Authorization", tc.authorization);
+                    headers.put("Authorization", tc.authorization);
                 }
             }
-            case "MISSING", "NONE" -> { /* no Authorization header */ }
-            default -> { }
+            default -> { /* MISSING / NONE: no Authorization header */ }
         }
+        if (tc.body != null && tc.contentType != null && !headers.containsKey("Content-Type")) {
+            headers.put("Content-Type", tc.contentType);
+        }
+        return headers;
+    }
 
-        HttpRequest.BodyPublisher publisher;
-        if (tc.body != null) {
-            publisher = HttpRequest.BodyPublishers.ofString(tc.body);
-            if (tc.contentType != null) {
-                builder.header("Content-Type", tc.contentType);
-            }
-        } else {
-            publisher = HttpRequest.BodyPublishers.noBody();
+    private HttpRequest buildRequest(String url, TestCase tc, Map<String, String> headers) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(30));
+        for (Map.Entry<String, String> h : headers.entrySet()) {
+            builder.header(h.getKey(), h.getValue());
         }
+        HttpRequest.BodyPublisher publisher = tc.body != null
+                ? HttpRequest.BodyPublishers.ofString(tc.body)
+                : HttpRequest.BodyPublishers.noBody();
         builder.method(tc.method, publisher);
         return builder.build();
+    }
+
+    /** Reconstructs the request as a runnable cURL command ({@code -k} because TLS is not verified). */
+    private String buildCurl(String url, TestCase tc, Map<String, String> headers) {
+        StringBuilder sb = new StringBuilder("curl -k -X ").append(tc.method)
+                .append(" ").append(shellQuote(url));
+        for (Map.Entry<String, String> h : headers.entrySet()) {
+            sb.append(" \\\n  -H ").append(shellQuote(h.getKey() + ": " + h.getValue()));
+        }
+        if (tc.body != null) {
+            sb.append(" \\\n  --data ").append(shellQuote(tc.body));
+        }
+        return sb.toString();
+    }
+
+    /** Single-quote a value for a POSIX shell, escaping embedded single quotes. */
+    private String shellQuote(String value) {
+        return "'" + value.replace("'", "'\\''") + "'";
+    }
+
+    private String renderResponseHeaders(HttpResponse<String> response) {
+        StringBuilder sb = new StringBuilder();
+        response.headers().map().forEach((name, values) -> {
+            for (String v : values) {
+                sb.append(name).append(": ").append(v).append('\n');
+            }
+        });
+        return sb.toString().strip();
     }
 
     private String snippet(String body) {

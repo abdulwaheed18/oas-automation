@@ -26,5 +26,11 @@ public class TestResult {
     /** First slice of the response body, for debugging. */
     public String responseSnippet;
 
+    /** Response headers as they came back, rendered one per line. */
+    public String responseHeaders;
+
+    /** The exact request that was sent, as a runnable cURL command (TLS verification disabled). */
+    public String curl;
+
     public long latencyMs;
 }

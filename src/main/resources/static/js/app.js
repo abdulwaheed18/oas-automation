@@ -413,14 +413,28 @@ function renderResults() {
                 </div>
                 <div class="result-detail">
                     <div class="row"><span class="k">Endpoint</span> ${r.method} ${escapeHtml(r.endpointPath)}</div>
-                    <div class="row"><span class="k">Request URL</span> ${escapeHtml(r.requestUrl)}</div>
                     <div class="row"><span class="k">Expected</span> ${escapeHtml(r.expectedStatusFamily || '')}</div>
-                    <div class="row"><span class="k">Actual status</span> ${r.actualStatus}</div>
                     <div class="row"><span class="k">Verdict</span> ${escapeHtml(r.message || '')}</div>
-                    <div class="row"><span class="k">Response body</span></div>
-                    <pre>${escapeHtml(r.responseSnippet || '(empty)')}</pre>
+                    <div class="io-head"><span class="k">▶ Request sent (cURL)</span>
+                        <button class="btn ghost small copy-btn" data-copy="${escapeAttr(r.curl || '')}">Copy</button></div>
+                    <pre class="req">${escapeHtml(r.curl || '(not sent)')}</pre>
+                    <div class="io-head"><span class="k">◀ Response received</span>
+                        <span class="io-status">HTTP ${r.actualStatus || '—'} · ${r.latencyMs}ms</span></div>
+                    <pre class="resp-hdr">${escapeHtml(r.responseHeaders || '(no headers)')}</pre>
+                    <pre>${escapeHtml(r.responseSnippet || '(empty body)')}</pre>
                 </div>`;
-            div.querySelector('.result-head').addEventListener('click', () => div.classList.toggle('open'));
+            div.querySelector('.result-head').addEventListener('click', (e) => {
+                if (e.target.classList.contains('copy-btn')) return;
+                div.classList.toggle('open');
+            });
+            const copyBtn = div.querySelector('.copy-btn');
+            if (copyBtn) copyBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(copyBtn.dataset.copy).then(() => {
+                    const t = copyBtn.textContent; copyBtn.textContent = 'Copied!';
+                    setTimeout(() => copyBtn.textContent = t, 1200);
+                }).catch(() => {});
+            });
             list.appendChild(div);
         });
     if (list.children.length === 0) list.innerHTML = '<p class="sub">No results for this filter.</p>';
@@ -441,6 +455,15 @@ function downloadReport() {
             <td>${escapeHtml(x.message || '')}</td>
         </tr>`).join('');
 
+    const repro = r.results.filter(x => x.verdict !== 'PASS').map(x => `
+        <div class="repro">
+            <div class="rh"><b>${x.id}</b> <span class="v ${x.verdict}">${x.verdict}</span> ${escapeHtml(x.method + ' ' + x.endpointPath)} — ${escapeHtml(x.name)}</div>
+            <div class="lbl">Request sent (cURL):</div>
+            <pre class="req">${escapeHtml(x.curl || '(not sent)')}</pre>
+            <div class="lbl">Response received — HTTP ${x.actualStatus} (${x.latencyMs}ms):</div>
+            <pre>${escapeHtml((x.responseHeaders ? x.responseHeaders + '\n\n' : '') + (x.responseSnippet || '(empty body)'))}</pre>
+        </div>`).join('');
+
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
 <title>OAS Test Report — ${escapeHtml(p.apiName)}</title>
 <style>
@@ -458,6 +481,13 @@ tr.FAIL td:nth-child(2){color:#dc2626;font-weight:700;}
 tr.PASS td:nth-child(2){color:#15a34a;font-weight:700;}
 tr.ERROR td:nth-child(2){color:#d97706;font-weight:700;}
 .note{white-space:pre-wrap;}
+.repro{border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin:10px 0;}
+.repro .rh{font-size:13px;margin-bottom:8px;}
+.repro .v{font-size:11px;font-weight:700;padding:1px 7px;border-radius:9px;color:#fff;}
+.repro .v.FAIL{background:#dc2626;} .repro .v.ERROR{background:#d97706;}
+.repro .lbl{font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;margin:8px 0 3px;}
+.repro pre{background:#0f172a;color:#e2e8f0;padding:9px 11px;border-radius:7px;font-size:12px;white-space:pre-wrap;word-break:break-word;overflow-x:auto;margin:0;}
+.repro pre.req{background:#10231b;color:#b9f6ca;}
 </style></head><body>
 <h1>${escapeHtml(b.appName || 'OAS Automation Test Suite')} — Report</h1>
 <div class="muted">${escapeHtml(b.company || '')} · Generated ${new Date().toLocaleString()}</div>
@@ -481,6 +511,7 @@ tr.ERROR td:nth-child(2){color:#d97706;font-weight:700;}
 <thead><tr><th>ID</th><th>Verdict</th><th>Category</th><th>Endpoint</th><th>Test case</th><th>Expected</th><th>Actual</th><th>Details</th></tr></thead>
 <tbody>${rows}</tbody>
 </table>
+${repro ? '<h3>Reproduction — failed &amp; errored cases (request / response)</h3>' + repro : ''}
 </body></html>`;
 
     const blob = new Blob([html], { type: 'text/html' });
