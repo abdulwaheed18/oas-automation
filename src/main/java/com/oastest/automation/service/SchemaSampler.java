@@ -20,6 +20,7 @@ public final class SchemaSampler {
     /** Returns the effective JSON type of a schema, tolerating OpenAPI 3.0 and 3.1 shapes. */
     @SuppressWarnings("rawtypes")
     public static String type(Schema schema) {
+        schema = SchemaComposer.resolve(schema);
         if (schema == null) {
             return null;
         }
@@ -43,6 +44,7 @@ public final class SchemaSampler {
     /** Builds a valid sample value tree for the given schema. */
     @SuppressWarnings({"rawtypes", "unchecked"})
     public static Object valid(Schema schema) {
+        schema = SchemaComposer.resolve(schema);
         if (schema == null) {
             return "sample";
         }

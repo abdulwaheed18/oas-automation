@@ -16,8 +16,13 @@ public class TestingProperties {
     /** Codes a valid (positive baseline) request is expected to return. */
     private String successCodes = "200,201,202,204";
 
-    /** Codes an invalid request (validation negative) is expected to be rejected with. */
-    private String rejectCodes = "400,401,403,404,405,406,409,415,422,429,499";
+    /**
+     * Codes an invalid request (schema/validation negative) is expected to be rejected with.
+     * Tyk returns <b>422</b> when its OpenAPI request validation rejects a request, so that is the
+     * default: any other status (a 2xx pass-through, or a 4xx from the upstream) means Tyk did not
+     * enforce the contract. Broaden this (e.g. {@code 400,422}) if your gateway differs.
+     */
+    private String rejectCodes = "422";
 
     /** Codes an unauthenticated / bad-token request is expected to be rejected with. */
     private String authRejectCodes = "401,403";

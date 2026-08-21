@@ -188,6 +188,80 @@ class TestCaseGenerationTest {
     }
 
     @Test
+    void handlesAllOfCompositionAndNestedRequiredFields() throws Exception {
+        String yaml = """
+                openapi: 3.0.3
+                info: { title: Comp, version: 1.0.0 }
+                paths:
+                  /orders:
+                    post:
+                      requestBody:
+                        required: true
+                        content:
+                          application/json:
+                            schema:
+                              allOf:
+                                - type: object
+                                  required: [id]
+                                  properties:
+                                    id: { type: integer }
+                                - type: object
+                                  required: [customer]
+                                  properties:
+                                    customer:
+                                      type: object
+                                      required: [email]
+                                      properties:
+                                        email: { type: string, format: email }
+                      responses:
+                        '200': { description: OK }
+                """;
+        OpenAPI api = parser.parse(yaml).getOpenAPI();
+        List<TestCase> cases = generator.generate(api, List.of("POST /orders"));
+
+        // allOf merged: required fields from BOTH sub-schemas are exercised.
+        assertThat(cases).anyMatch(c -> "Missing required body field: id".equals(c.name));
+        assertThat(cases).anyMatch(c -> "Missing required body field: customer".equals(c.name));
+        // Nested required field is reached via a dotted path.
+        assertThat(cases).anyMatch(c -> "customer.email".equals(c.negativeField));
+        // The valid baseline body contains the nested object.
+        TestCase positive = cases.stream().filter(c -> "POSITIVE".equals(c.category)).findFirst().orElseThrow();
+        assertThat(positive.body).contains("customer").contains("email");
+    }
+
+    @Test
+    void handlesQueryArrayParameters() throws Exception {
+        String yaml = """
+                openapi: 3.0.3
+                info: { title: Arr, version: 1.0.0 }
+                paths:
+                  /search:
+                    get:
+                      parameters:
+                        - name: tags
+                          in: query
+                          required: true
+                          schema:
+                            type: array
+                            minItems: 1
+                            maxItems: 3
+                            items: { type: string }
+                      responses:
+                        '200': { description: OK }
+                """;
+        OpenAPI api = parser.parse(yaml).getOpenAPI();
+        List<TestCase> cases = generator.generate(api, List.of("GET /search"));
+
+        // Baseline serialises the array as a repeated query param (explode default).
+        TestCase positive = cases.stream().filter(c -> "POSITIVE".equals(c.category)).findFirst().orElseThrow();
+        assertThat(positive.requestPath).contains("tags=");
+
+        // Array-specific negatives are generated.
+        assertThat(cases).anyMatch(c -> c.name.contains("empty array (below minItems)"));
+        assertThat(cases).anyMatch(c -> c.name.contains("too many items (above maxItems)"));
+    }
+
+    @Test
     void uuidFieldGetsValidV4Baseline() throws Exception {
         String yaml = """
                 openapi: 3.0.3

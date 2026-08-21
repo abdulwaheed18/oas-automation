@@ -56,10 +56,17 @@ the valid baseline is generated to actually **match** that pattern (so the posit
 falsely rejected), and the pattern-violation negative is only added when a genuinely non-matching
 value can be produced.
 
-Each case carries an **expected set of status codes** (see below). Validation negatives expect a
-**4xx**; auth negatives expect **401/403**; robustness probes (injection/XSS/traversal) expect
-**anything but a 5xx**. If the gateway returns something outside the expected set — most importantly a
-**2xx** for an invalid request — the case **FAILS**: the gateway did not enforce the contract.
+Each case carries an **expected set of status codes** (see below). **Tyk returns `422` when its
+OpenAPI validation rejects a request**, so validation negatives expect **422** by default — which
+also closes the "who rejected it?" gap: if a negative comes back as a **2xx** (passed through) or a
+non-422 4xx (rejected by the *upstream*, not the gateway), the case **FAILS** because Tyk did not
+enforce the contract. Auth negatives expect **401/403**; robustness probes (injection/XSS/traversal)
+expect **anything but a 5xx**. All of these are editable per run and in configuration.
+
+Coverage also includes **`allOf` / `oneOf` / `anyOf` composition** (merged/collapsed before
+generation), **nested object & array-of-object fields** (mutated at any depth, e.g.
+`customer.email`), and **query array parameters** (repeated-param serialization, `minItems`/
+`maxItems`, wrong item type). JSON request bodies only, for now.
 
 ### Expected status codes — configurable & editable
 

@@ -22,7 +22,36 @@ const $ = (id) => document.getElementById(id);
 window.addEventListener('DOMContentLoaded', async () => {
     await Promise.all([loadBranding(), loadSettings()]);
     wireEvents();
+    restoreSticky();
 });
+
+/* ------------------------------------------------------------------ */
+/*  Sticky session — remember inputs across reloads (non-prod tool)    */
+/* ------------------------------------------------------------------ */
+const STICKY_FIELDS = ['apiName', 'apiVersion', 'note', 'specContent', 'nexusUrl',
+    'targetBaseUrl', 'bearerToken', 'cfgSuccess', 'cfgReject', 'cfgAuth', 'cfgRobust'];
+
+function stickyGet(id) {
+    try { return localStorage.getItem('oas.' + id); } catch (_) { return null; }
+}
+function stickySet(id, v) {
+    try { localStorage.setItem('oas.' + id, v); } catch (_) { /* ignore quota/private mode */ }
+}
+
+function restoreSticky() {
+    STICKY_FIELDS.forEach(id => {
+        const el = $(id);
+        if (!el) return;
+        const v = stickyGet(id);
+        if (v !== null && v !== '') el.value = v;
+        el.addEventListener('input', () => stickySet(id, el.value));
+    });
+    const src = stickyGet('sourceType');
+    if (src) {
+        const tab = document.querySelector('.src-tab[data-src="' + src + '"]');
+        if (tab) tab.click();
+    }
+}
 
 async function loadBranding() {
     try {
@@ -60,6 +89,7 @@ function wireEvents() {
             document.querySelectorAll('.src-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             state.sourceType = tab.dataset.src;
+            stickySet('sourceType', state.sourceType);
             ['FILE', 'CLIPBOARD', 'NEXUS'].forEach(s => $('src-' + s).classList.toggle('hidden', s !== state.sourceType));
         });
     });
@@ -233,12 +263,12 @@ async function doGenerate() {
         if (!res.ok) { msg(2, await readError(res), 'error'); return; }
         const data = await res.json();
         state.cases = data.cases;
-        // prefill the code settings inputs
+        // prefill the code settings inputs (sticky value wins over the server default)
         const s = state.settings;
-        $('cfgSuccess').value = s.successCodes;
-        $('cfgReject').value = s.rejectCodes;
-        $('cfgAuth').value = s.authRejectCodes;
-        $('cfgRobust').value = s.robustnessCodes;
+        $('cfgSuccess').value = stickyGet('cfgSuccess') || s.successCodes;
+        $('cfgReject').value = stickyGet('cfgReject') || s.rejectCodes;
+        $('cfgAuth').value = stickyGet('cfgAuth') || s.authRejectCodes;
+        $('cfgRobust').value = stickyGet('cfgRobust') || s.robustnessCodes;
         renderCases();
         showStep(3);
     } catch (e) {
