@@ -98,11 +98,33 @@
         </div>
         <p class="hint">Requests hit <code>target base URL</code> + endpoint path. TLS certificate errors are ignored for the target.</p>
 
+        <div class="settings-panel">
+            <h3>Expected status codes</h3>
+            <p class="sub">Defaults from configuration — edit here, then <b>Apply</b> to update matching cases. You can also override any single case below. Accepts lists and ranges, e.g. <code>400,401,403,422,429</code> or <code>400-499</code>.</p>
+            <div class="settings-grid">
+                <label>Success (valid request)
+                    <input type="text" id="cfgSuccess"/>
+                </label>
+                <label>Reject (invalid request)
+                    <input type="text" id="cfgReject"/>
+                </label>
+                <label>Auth (unauthorized)
+                    <input type="text" id="cfgAuth"/>
+                </label>
+                <label>Robustness (no 5xx)
+                    <input type="text" id="cfgRobust"/>
+                </label>
+            </div>
+            <div style="margin-top:14px;">
+                <button class="btn ghost small" id="btnApplyCodes">Apply to matching cases</button>
+            </div>
+        </div>
+
         <div id="caseGroups" class="case-groups"></div>
 
         <div class="actions">
             <button class="btn ghost" data-goto="2">← Back</button>
-            <button class="btn primary" id="btnExecute">Execute all test cases ▶</button>
+            <button class="btn primary" id="btnExecute">▶ Execute all test cases</button>
         </div>
         <div class="msg" id="msg-3"></div>
     </section>
@@ -110,6 +132,7 @@
     <!-- ============ STEP 4 ============ -->
     <section class="panel hidden" id="panel-4">
         <h2>Results</h2>
+        <div class="banner" id="resultBanner"></div>
         <div class="summary-cards" id="summaryCards"></div>
         <div class="toolbar">
             <label class="filter">Filter:

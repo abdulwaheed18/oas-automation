@@ -85,21 +85,25 @@ public class TestExecutionService {
     }
 
     private void evaluate(TestResult r, TestCase tc) {
-        boolean inRange = r.actualStatus >= tc.expectedMin && r.actualStatus <= tc.expectedMax;
-        if (inRange) {
+        if (StatusMatcher.matches(tc.expectedStatuses, r.actualStatus)) {
             r.verdict = "PASS";
-            r.message = "Gateway behaved as the contract requires (HTTP " + r.actualStatus + ").";
+            r.message = "Gateway behaved as expected (HTTP " + r.actualStatus
+                    + " is in expected " + tc.expectedStatuses + ").";
             return;
         }
         r.verdict = "FAIL";
         if ("POSITIVE".equals(tc.category)) {
-            r.message = "Valid request did not succeed (HTTP " + r.actualStatus + "). "
-                    + "Check the base URL / bearer token — other results may be unreliable if this fails.";
+            r.message = "Valid request did not succeed (HTTP " + r.actualStatus + "; expected "
+                    + tc.expectedStatuses + "). Check the base URL / bearer token — other results may be "
+                    + "unreliable if this fails.";
         } else if (r.actualStatus >= 200 && r.actualStatus < 300) {
             r.message = "GATEWAY DID NOT ENFORCE THE CONTRACT: an invalid request was accepted (HTTP "
-                    + r.actualStatus + "). Expected " + tc.expectedStatusFamily + ".";
+                    + r.actualStatus + "). Expected " + tc.expectedStatuses + ".";
+        } else if (r.actualStatus >= 500) {
+            r.message = "Server error (HTTP " + r.actualStatus + ") — the gateway/upstream may have "
+                    + "mishandled the input. Expected " + tc.expectedStatuses + ".";
         } else {
-            r.message = "Unexpected status HTTP " + r.actualStatus + "; expected " + tc.expectedStatusFamily + ".";
+            r.message = "Unexpected status HTTP " + r.actualStatus + "; expected " + tc.expectedStatuses + ".";
         }
     }
 
@@ -118,8 +122,11 @@ public class TestExecutionService {
                     builder.header("Authorization", "Bearer " + bearerToken.trim());
                 }
             }
-            case "MALFORMED" -> builder.header("Authorization", "Bearer this.is.not-a-valid-jwt");
-            case "EMPTY" -> builder.header("Authorization", "Bearer ");
+            case "OVERRIDE" -> {
+                if (tc.authorization != null) {
+                    builder.header("Authorization", tc.authorization);
+                }
+            }
             case "MISSING", "NONE" -> { /* no Authorization header */ }
             default -> { }
         }

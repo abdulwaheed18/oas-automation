@@ -11,6 +11,7 @@ import java.util.Map;
 import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.oastest.automation.config.TestingProperties;
 import com.oastest.automation.model.TestCase;
 
 import io.swagger.v3.oas.models.OpenAPI;
@@ -24,24 +25,42 @@ import io.swagger.v3.oas.models.parameters.RequestBody;
  * Generates negative / edge-case test cases from an OpenAPI operation.
  *
  * <p>Design rule: every negative case mutates <b>exactly one</b> thing relative to a fully-valid
- * baseline request. That keeps each failure attributable to a single root cause, which is exactly
- * what you need to know whether the gateway enforces one specific constraint.</p>
+ * baseline request. That keeps each failure attributable to a single root cause.</p>
+ *
+ * <p>Cases fall into four expectation classes (see {@link Expect}) whose accepted status codes come
+ * from {@link TestingProperties} and are editable per-run from the UI.</p>
  */
 @Service
 public class TestCaseGeneratorService {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private static final String MALFORMED_BEARER = "this.is.not-a-valid-jwt";
+    // Reusable hostile payloads.
+    private static final String SQL_INJECTION = "' OR '1'='1";
+    private static final String XSS = "<script>alert(1)</script>";
+    private static final String PATH_TRAVERSAL = "../../../../etc/passwd";
+    private static final String INVALID_JWT =
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0In0.invalid-signature-here";
 
-    /** Small holder for a single-field negative value + a label describing the violation. */
+    private final TestingProperties props;
+
+    public TestCaseGeneratorService(TestingProperties props) {
+        this.props = props;
+    }
+
+    /** Expectation class for a case; maps to a configurable set of accepted status codes. */
+    private enum Expect { SUCCESS, REJECT, AUTH_REJECT, NO_5XX }
+
+    /** A single-field negative value + a label + the expectation class for the mutated request. */
     private static class Violation {
         final String label;
         final Object value;
+        final Expect expect;
 
-        Violation(String label, Object value) {
+        Violation(String label, Object value, Expect expect) {
             this.label = label;
             this.value = value;
+            this.expect = expect;
         }
     }
 
@@ -75,56 +94,54 @@ public class TestCaseGeneratorService {
         BodyInfo body = resolveBody(op);
 
         // 1. Positive baseline — everything valid.
-        TestCase positive = base(method, path, "POSITIVE",
-                "Valid baseline request", null,
+        TestCase positive = base(method, path, "POSITIVE", "Valid baseline request", null,
                 "Fully-valid request; the gateway should forward it to the upstream.",
                 secured, params, body, counter);
-        positive.expectedStatusFamily = "2xx/3xx (accept)";
-        positive.expectedMin = 200;
-        positive.expectedMax = 399;
-        positive.expectedOutcome = "Gateway accepts the valid request and forwards upstream.";
+        setExpect(positive, Expect.SUCCESS);
         sink.add(positive);
 
         // 2. Auth negatives.
         if (secured) {
-            sink.add(authCase(method, path, params, body, "MISSING",
+            sink.add(authCase(method, path, params, body, counter, "MISSING", null,
                     "Missing Authorization header",
-                    "No bearer token is sent. A secured route must reject this.", counter));
-            sink.add(authCase(method, path, params, body, "MALFORMED",
-                    "Malformed bearer token",
-                    "A structurally-invalid bearer token is sent (" + MALFORMED_BEARER + ").", counter));
-            sink.add(authCase(method, path, params, body, "EMPTY",
-                    "Empty bearer token",
-                    "Authorization header is present but the token value is empty.", counter));
+                    "No bearer token is sent; a secured route must reject this."));
+            sink.add(authCase(method, path, params, body, counter, "OVERRIDE", "Bearer this.is.not-a-valid-jwt",
+                    "Malformed bearer token", "A structurally-invalid bearer token is sent."));
+            sink.add(authCase(method, path, params, body, counter, "OVERRIDE", "Bearer ",
+                    "Empty bearer token", "Authorization header is present but the token value is empty."));
+            sink.add(authCase(method, path, params, body, counter, "OVERRIDE", "Basic dXNlcjpwYXNz",
+                    "Wrong auth scheme (Basic)", "Basic auth is sent where a bearer token is required."));
+            sink.add(authCase(method, path, params, body, counter, "OVERRIDE", "Bearer " + INVALID_JWT,
+                    "Well-formed JWT, bad signature",
+                    "A syntactically-valid JWT with an invalid signature is sent."));
+            sink.add(authCase(method, path, params, body, counter, "OVERRIDE", "Bearer " + SQL_INJECTION,
+                    "Injection in bearer token", "An injection string is sent as the bearer token."));
         }
 
         // 3. Parameter negatives (headers, query, path) — one bad param per case.
         for (Parameter p : params) {
             String in = p.getIn();
             String name = p.getName();
-            boolean required = Boolean.TRUE.equals(p.getRequired()) || "path".equals(in);
             Schema<?> schema = p.getSchema();
+            boolean required = Boolean.TRUE.equals(p.getRequired()) || "path".equals(in);
 
             if (required && !"path".equals(in)) {
                 TestCase c = base(method, path, in.toUpperCase(),
-                        "Missing required " + in + " parameter: " + name,
-                        name,
-                        "Omit the required " + in + " parameter '" + name + "'; the gateway should reject it.",
+                        "Missing required " + in + " parameter: " + name, name,
+                        "Omit the required " + in + " parameter '" + name + "'.",
                         secured, params, body, counter);
-                removeParam(c, p, params, method, path, secured, body);
-                markReject(c);
+                removeParam(c, p, params, path);
+                setExpect(c, Expect.REJECT);
                 sink.add(c);
             }
 
-            for (Violation v : paramViolations(schema)) {
+            for (Violation v : paramViolations(schema, in)) {
                 TestCase c = base(method, path, in.toUpperCase(),
-                        in + " parameter '" + name + "': " + v.label,
-                        name,
-                        "Set " + in + " parameter '" + name + "' to an invalid value (" + v.label
-                                + "); the gateway should reject it.",
+                        in + " parameter '" + name + "': " + v.label, name,
+                        "Set " + in + " parameter '" + name + "' to: " + v.label + ".",
                         secured, params, body, counter);
-                overrideParam(c, p, params, method, path, secured, body, String.valueOf(v.value));
-                markReject(c);
+                overrideParam(c, p, params, path, String.valueOf(v.value));
+                setExpect(c, v.expect);
                 sink.add(c);
             }
         }
@@ -132,60 +149,83 @@ public class TestCaseGeneratorService {
         // 4. Body negatives.
         if (body != null && body.schema != null) {
             if (body.required) {
-                TestCase c = base(method, path, "BODY",
-                        "Missing required request body", "<body>",
+                TestCase c = base(method, path, "BODY", "Missing required request body", "<body>",
                         "Send no request body although the spec marks it required.",
                         secured, params, body, counter);
                 c.body = null;
                 c.contentType = null;
-                markReject(c);
+                setExpect(c, Expect.REJECT);
                 sink.add(c);
             }
 
-            TestCase malformed = base(method, path, "BODY",
-                    "Malformed JSON body", "<body>",
-                    "Send a syntactically-broken JSON body; the gateway should reject it.",
-                    secured, params, body, counter);
+            TestCase malformed = base(method, path, "BODY", "Malformed JSON body", "<body>",
+                    "Send a syntactically-broken JSON body.", secured, params, body, counter);
             malformed.body = "{ \"broken\": ";
-            malformed.contentType = "application/json";
-            markReject(malformed);
+            setExpect(malformed, Expect.REJECT);
             sink.add(malformed);
 
-            Map<String, Schema> props = body.schema.getProperties();
+            TestCase wrongRootArray = base(method, path, "BODY", "Wrong root type (array for object)", "<body>",
+                    "Send a JSON array where an object is expected.", secured, params, body, counter);
+            wrongRootArray.body = "[]";
+            setExpect(wrongRootArray, Expect.REJECT);
+            sink.add(wrongRootArray);
+
+            TestCase wrongRootString = base(method, path, "BODY", "Wrong root type (string for object)", "<body>",
+                    "Send a bare JSON string where an object is expected.", secured, params, body, counter);
+            wrongRootString.body = "\"not-an-object\"";
+            setExpect(wrongRootString, Expect.REJECT);
+            sink.add(wrongRootString);
+
+            Map<String, Schema> props0 = body.schema.getProperties();
             List<String> requiredProps = body.schema.getRequired();
-            if (props != null) {
-                for (Map.Entry<String, Schema> e : props.entrySet()) {
+            if (props0 != null && !props0.isEmpty()) {
+                if (requiredProps != null && !requiredProps.isEmpty()) {
+                    TestCase empty = base(method, path, "BODY", "Empty JSON object (missing all required fields)",
+                            "<body>", "Send {} although required fields are declared.",
+                            secured, params, body, counter);
+                    empty.body = "{}";
+                    setExpect(empty, Expect.REJECT);
+                    sink.add(empty);
+                }
+
+                for (Map.Entry<String, Schema> e : props0.entrySet()) {
                     String field = e.getKey();
                     Schema<?> fieldSchema = e.getValue();
 
                     if (requiredProps != null && requiredProps.contains(field)) {
-                        TestCase c = base(method, path, "BODY",
-                                "Missing required body field: " + field, field,
-                                "Omit the required body field '" + field + "'.",
+                        TestCase miss = base(method, path, "BODY", "Missing required body field: " + field,
+                                field, "Omit the required body field '" + field + "'.",
                                 secured, params, body, counter);
-                        c.body = bodyWithout(body.schema, field);
-                        markReject(c);
-                        sink.add(c);
+                        miss.body = bodyWithout(body.schema, field);
+                        setExpect(miss, Expect.REJECT);
+                        sink.add(miss);
 
-                        TestCase nullCase = base(method, path, "BODY",
-                                "Null value for required body field: " + field, field,
-                                "Send null for the required body field '" + field + "'.",
+                        TestCase nul = base(method, path, "BODY", "Null value for required body field: " + field,
+                                field, "Send null for the required body field '" + field + "'.",
                                 secured, params, body, counter);
-                        nullCase.body = bodyWith(body.schema, field, null);
-                        markReject(nullCase);
-                        sink.add(nullCase);
+                        nul.body = bodyWith(body.schema, field, null);
+                        setExpect(nul, Expect.REJECT);
+                        sink.add(nul);
                     }
 
                     for (Violation v : bodyFieldViolations(fieldSchema)) {
-                        TestCase c = base(method, path, "BODY",
-                                "Body field '" + field + "': " + v.label, field,
-                                "Set body field '" + field + "' to an invalid value (" + v.label + ").",
+                        TestCase c = base(method, path, "BODY", "Body field '" + field + "': " + v.label,
+                                field, "Set body field '" + field + "' to: " + v.label + ".",
                                 secured, params, body, counter);
                         c.body = bodyWith(body.schema, field, v.value);
-                        markReject(c);
+                        setExpect(c, v.expect);
                         sink.add(c);
                     }
                 }
+
+                // Unexpected extra property.
+                boolean additionalDisallowed = Boolean.FALSE.equals(body.schema.getAdditionalProperties())
+                        || (body.schema.getAdditionalProperties() instanceof Boolean bb && !bb);
+                TestCase extra = base(method, path, "BODY", "Unexpected extra field", "__unexpected_field__",
+                        "Add a property not declared in the schema.", secured, params, body, counter);
+                extra.body = bodyWith(body.schema, "__unexpected_field__", "surprise");
+                setExpect(extra, additionalDisallowed ? Expect.REJECT : Expect.NO_5XX);
+                sink.add(extra);
             }
         }
     }
@@ -206,9 +246,9 @@ public class TestCaseGeneratorService {
         c.negativeField = negativeField;
         c.description = description;
         c.authMode = secured ? "VALID" : "NONE";
-        c.requestPath = buildPath(path, params, validPathValues(params), includedQuery(params, null, null));
+        c.requestPath = buildPath(path, validPathValues(params), includedQuery(params, null));
         for (Parameter p : params) {
-            if ("header".equals(p.getIn()) && isIncludedHeader(p)) {
+            if ("header".equals(p.getIn()) && Boolean.TRUE.equals(p.getRequired())) {
                 c.headers.put(p.getName(), String.valueOf(SchemaSampler.valid(p.getSchema())));
             }
         }
@@ -219,53 +259,60 @@ public class TestCaseGeneratorService {
         return c;
     }
 
-    /** True for required headers, or optional ones we still include to keep the baseline realistic. */
-    private boolean isIncludedHeader(Parameter p) {
-        return Boolean.TRUE.equals(p.getRequired());
-    }
-
-    private TestCase authCase(String method, String path, List<Parameter> params, BodyInfo body,
-                              String authMode, String name, String description, int[] counter) {
-        TestCase c = base(method, path, "AUTH", name, "Authorization", description,
-                true, params, body, counter);
+    private TestCase authCase(String method, String path, List<Parameter> params, BodyInfo body, int[] counter,
+                             String authMode, String authorization, String name, String description) {
+        TestCase c = base(method, path, "AUTH", name, "Authorization", description, true, params, body, counter);
         c.authMode = authMode;
-        c.expectedStatusFamily = "401/403 (unauthorized)";
-        c.expectedMin = 400;
-        c.expectedMax = 403;
-        c.expectedOutcome = "Gateway rejects the request as unauthorized.";
+        c.authorization = authorization;
+        setExpect(c, Expect.AUTH_REJECT);
         return c;
     }
 
-    private void markReject(TestCase c) {
-        c.expectedStatusFamily = "4xx (reject)";
-        c.expectedMin = 400;
-        c.expectedMax = 499;
-        c.expectedOutcome = "Gateway rejects the invalid request per the OpenAPI contract.";
-    }
-
-    private void removeParam(TestCase c, Parameter target, List<Parameter> all, String method, String path,
-                             boolean secured, BodyInfo body) {
-        if ("header".equals(target.getIn())) {
-            c.headers.remove(target.getName());
-        } else if ("query".equals(target.getIn())) {
-            Map<String, String> q = includedQuery(all, target.getName(), null);
-            c.requestPath = buildPath(path, all, validPathValues(all), q);
+    private void setExpect(TestCase c, Expect e) {
+        switch (e) {
+            case SUCCESS -> {
+                c.expectedStatuses = props.getSuccessCodes();
+                c.expectedStatusFamily = "2xx (accept)";
+                c.expectedOutcome = "Gateway accepts the valid request and forwards it upstream.";
+            }
+            case REJECT -> {
+                c.expectedStatuses = props.getRejectCodes();
+                c.expectedStatusFamily = "4xx (reject)";
+                c.expectedOutcome = "Gateway rejects the invalid request per the OpenAPI contract.";
+            }
+            case AUTH_REJECT -> {
+                c.expectedStatuses = props.getAuthRejectCodes();
+                c.expectedStatusFamily = "401/403 (unauthorized)";
+                c.expectedOutcome = "Gateway rejects the request as unauthorized.";
+            }
+            case NO_5XX -> {
+                c.expectedStatuses = props.getRobustnessCodes();
+                c.expectedStatusFamily = "no 5xx (handled)";
+                c.expectedOutcome = "Gateway should handle the hostile input gracefully (no server error).";
+            }
         }
     }
 
-    private void overrideParam(TestCase c, Parameter target, List<Parameter> all, String method, String path,
-                               boolean secured, BodyInfo body, String badValue) {
+    private void removeParam(TestCase c, Parameter target, List<Parameter> all, String path) {
+        if ("header".equals(target.getIn())) {
+            c.headers.remove(target.getName());
+        } else if ("query".equals(target.getIn())) {
+            c.requestPath = buildPath(path, validPathValues(all), includedQuery(all, target.getName()));
+        }
+    }
+
+    private void overrideParam(TestCase c, Parameter target, List<Parameter> all, String path, String badValue) {
         String in = target.getIn();
         if ("header".equals(in)) {
             c.headers.put(target.getName(), badValue);
         } else if ("query".equals(in)) {
-            Map<String, String> q = includedQuery(all, null, null);
+            Map<String, String> q = includedQuery(all, null);
             q.put(target.getName(), badValue);
-            c.requestPath = buildPath(path, all, validPathValues(all), q);
+            c.requestPath = buildPath(path, validPathValues(all), q);
         } else if ("path".equals(in)) {
             Map<String, String> pv = validPathValues(all);
             pv.put(target.getName(), badValue);
-            c.requestPath = buildPath(path, all, pv, includedQuery(all, null, null));
+            c.requestPath = buildPath(path, pv, includedQuery(all, null));
         }
     }
 
@@ -283,8 +330,7 @@ public class TestCaseGeneratorService {
         return values;
     }
 
-    /** Required query params with valid values, optionally excluding one (for a "missing" case). */
-    private Map<String, String> includedQuery(List<Parameter> params, String excludeName, Void unused) {
+    private Map<String, String> includedQuery(List<Parameter> params, String excludeName) {
         Map<String, String> q = new LinkedHashMap<>();
         for (Parameter p : params) {
             if ("query".equals(p.getIn()) && Boolean.TRUE.equals(p.getRequired())) {
@@ -297,8 +343,7 @@ public class TestCaseGeneratorService {
         return q;
     }
 
-    private String buildPath(String template, List<Parameter> params, Map<String, String> pathValues,
-                             Map<String, String> query) {
+    private String buildPath(String template, Map<String, String> pathValues, Map<String, String> query) {
         String resolved = template;
         for (Map.Entry<String, String> e : pathValues.entrySet()) {
             resolved = resolved.replace("{" + e.getKey() + "}", encodePathSegment(e.getValue()));
@@ -330,7 +375,7 @@ public class TestCaseGeneratorService {
     // Violation catalogues
     // ---------------------------------------------------------------------
 
-    private List<Violation> paramViolations(Schema<?> schema) {
+    private List<Violation> paramViolations(Schema<?> schema, String in) {
         List<Violation> out = new ArrayList<>();
         if (schema == null) {
             return out;
@@ -338,35 +383,45 @@ public class TestCaseGeneratorService {
         String type = SchemaSampler.type(schema);
         List<?> enums = schema.getEnum();
         if (enums != null && !enums.isEmpty()) {
-            out.add(new Violation("value not in enum", "___not_in_enum___"));
+            out.add(new Violation("value not in enum", "___not_in_enum___", Expect.REJECT));
         }
         if ("integer".equals(type) || "number".equals(type)) {
-            out.add(new Violation("non-numeric value", "not-a-number"));
+            out.add(new Violation("non-numeric value", "not-a-number", Expect.REJECT));
             if (schema.getMinimum() != null) {
-                out.add(new Violation("below minimum", schema.getMinimum().subtract(BigDecimal.ONE).toString()));
+                out.add(new Violation("below minimum", schema.getMinimum().subtract(BigDecimal.ONE).toString(), Expect.REJECT));
+                out.add(new Violation("minimum boundary (valid)", schema.getMinimum().toString(), Expect.SUCCESS));
             }
             if (schema.getMaximum() != null) {
-                out.add(new Violation("above maximum", schema.getMaximum().add(BigDecimal.ONE).toString()));
+                out.add(new Violation("above maximum", schema.getMaximum().add(BigDecimal.ONE).toString(), Expect.REJECT));
+                out.add(new Violation("maximum boundary (valid)", schema.getMaximum().toString(), Expect.SUCCESS));
+            } else {
+                out.add(new Violation("numeric overflow", "999999999999999999999", Expect.NO_5XX));
             }
         } else if ("boolean".equals(type)) {
-            out.add(new Violation("non-boolean value", "notaboolean"));
-        } else { // string and everything else on the wire
+            out.add(new Violation("non-boolean value", "notaboolean", Expect.REJECT));
+        } else { // string and other on-the-wire values
             if (schema.getPattern() != null) {
-                out.add(new Violation("pattern violation w/ special chars", "@@@!!!___###"));
+                out.add(new Violation("pattern violation w/ special chars", "@@@!!!___###", Expect.REJECT));
             }
             if (schema.getMinLength() != null && schema.getMinLength() > 0) {
-                out.add(new Violation("below minLength", ""));
+                out.add(new Violation("below minLength", "", Expect.REJECT));
             }
             if (schema.getMaxLength() != null) {
-                out.add(new Violation("above maxLength", "x".repeat(schema.getMaxLength() + 1)));
+                out.add(new Violation("above maxLength", "x".repeat(schema.getMaxLength() + 1), Expect.REJECT));
             }
             String fmt = schema.getFormat();
             if ("uuid".equals(fmt)) {
-                out.add(new Violation("invalid uuid format", "not-a-uuid"));
+                out.add(new Violation("invalid uuid format", "not-a-uuid", Expect.REJECT));
             } else if ("email".equals(fmt)) {
-                out.add(new Violation("invalid email format", "not-an-email"));
+                out.add(new Violation("invalid email format", "not-an-email", Expect.REJECT));
             } else if ("date".equals(fmt) || "date-time".equals(fmt)) {
-                out.add(new Violation("invalid " + fmt + " format", "13/40/9999"));
+                out.add(new Violation("invalid " + fmt + " format", "13/40/9999", Expect.REJECT));
+            }
+            // Robustness probes (should be handled without a 5xx).
+            out.add(new Violation("SQL injection string", SQL_INJECTION, Expect.NO_5XX));
+            out.add(new Violation("XSS string", XSS, Expect.NO_5XX));
+            if ("path".equals(in)) {
+                out.add(new Violation("path traversal", PATH_TRAVERSAL, Expect.NO_5XX));
             }
         }
         return out;
@@ -381,41 +436,45 @@ public class TestCaseGeneratorService {
         String type = SchemaSampler.type(schema);
         List<?> enums = schema.getEnum();
         if (enums != null && !enums.isEmpty()) {
-            out.add(new Violation("value not in enum", "___not_in_enum___"));
+            out.add(new Violation("value not in enum", "___not_in_enum___", Expect.REJECT));
         }
         if ("integer".equals(type) || "number".equals(type)) {
-            out.add(new Violation("wrong type (string for number)", "not-a-number"));
+            out.add(new Violation("wrong type (string for number)", "not-a-number", Expect.REJECT));
             if (schema.getMinimum() != null) {
-                out.add(new Violation("below minimum", schema.getMinimum().subtract(BigDecimal.ONE)));
+                out.add(new Violation("below minimum", schema.getMinimum().subtract(BigDecimal.ONE), Expect.REJECT));
+                out.add(new Violation("minimum boundary (valid)", schema.getMinimum(), Expect.SUCCESS));
             }
             if (schema.getMaximum() != null) {
-                out.add(new Violation("above maximum", schema.getMaximum().add(BigDecimal.ONE)));
+                out.add(new Violation("above maximum", schema.getMaximum().add(BigDecimal.ONE), Expect.REJECT));
+                out.add(new Violation("maximum boundary (valid)", schema.getMaximum(), Expect.SUCCESS));
             }
         } else if ("boolean".equals(type)) {
-            out.add(new Violation("wrong type (string for boolean)", "maybe"));
+            out.add(new Violation("wrong type (string for boolean)", "maybe", Expect.REJECT));
         } else if ("array".equals(type)) {
-            out.add(new Violation("wrong type (string for array)", "not-an-array"));
+            out.add(new Violation("wrong type (string for array)", "not-an-array", Expect.REJECT));
         } else if ("object".equals(type)) {
-            out.add(new Violation("wrong type (string for object)", "not-an-object"));
+            out.add(new Violation("wrong type (string for object)", "not-an-object", Expect.REJECT));
         } else { // string
-            out.add(new Violation("wrong type (number for string)", 1234567));
+            out.add(new Violation("wrong type (number for string)", 1234567, Expect.REJECT));
             if (schema.getPattern() != null) {
-                out.add(new Violation("pattern violation w/ special chars", "@@@!!!___###"));
+                out.add(new Violation("pattern violation w/ special chars", "@@@!!!___###", Expect.REJECT));
             }
             if (schema.getMinLength() != null && schema.getMinLength() > 0) {
-                out.add(new Violation("below minLength", ""));
+                out.add(new Violation("below minLength", "", Expect.REJECT));
             }
             if (schema.getMaxLength() != null) {
-                out.add(new Violation("above maxLength", "x".repeat(schema.getMaxLength() + 1)));
+                out.add(new Violation("above maxLength", "x".repeat(schema.getMaxLength() + 1), Expect.REJECT));
             }
             String fmt = schema.getFormat();
             if ("uuid".equals(fmt)) {
-                out.add(new Violation("invalid uuid format", "not-a-uuid"));
+                out.add(new Violation("invalid uuid format", "not-a-uuid", Expect.REJECT));
             } else if ("email".equals(fmt)) {
-                out.add(new Violation("invalid email format", "not-an-email"));
+                out.add(new Violation("invalid email format", "not-an-email", Expect.REJECT));
             } else if ("date".equals(fmt) || "date-time".equals(fmt)) {
-                out.add(new Violation("invalid " + fmt + " format", "13/40/9999"));
+                out.add(new Violation("invalid " + fmt + " format", "13/40/9999", Expect.REJECT));
             }
+            out.add(new Violation("SQL injection string", SQL_INJECTION, Expect.NO_5XX));
+            out.add(new Violation("XSS string", XSS, Expect.NO_5XX));
         }
         return out;
     }
@@ -428,8 +487,7 @@ public class TestCaseGeneratorService {
     private String bodyWith(Schema<?> schema, String field, Object value) {
         Object valid = SchemaSampler.valid(schema);
         if (valid instanceof Map) {
-            Map<String, Object> map = (Map<String, Object>) valid;
-            map.put(field, value);
+            ((Map<String, Object>) valid).put(field, value);
         }
         return toJson(valid);
     }

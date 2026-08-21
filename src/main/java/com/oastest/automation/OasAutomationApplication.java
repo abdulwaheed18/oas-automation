@@ -5,6 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 import com.oastest.automation.config.BrandingProperties;
+import com.oastest.automation.config.TestingProperties;
 
 /**
  * Entry point for the OAS Automation Test Suite.
@@ -15,7 +16,7 @@ import com.oastest.automation.config.BrandingProperties;
  * reports whether the gateway enforces the contract as declared in the spec.</p>
  */
 @SpringBootApplication
-@EnableConfigurationProperties(BrandingProperties.class)
+@EnableConfigurationProperties({BrandingProperties.class, TestingProperties.class})
 public class OasAutomationApplication {
 
     public static void main(String[] args) {

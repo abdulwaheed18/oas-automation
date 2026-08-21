@@ -22,7 +22,8 @@ import io.swagger.v3.oas.models.OpenAPI;
 class TestCaseGenerationTest {
 
     private final SpecParserService parser = new SpecParserService();
-    private final TestCaseGeneratorService generator = new TestCaseGeneratorService();
+    private final TestCaseGeneratorService generator =
+            new TestCaseGeneratorService(new com.oastest.automation.config.TestingProperties());
 
     private OpenAPI loadSample() throws Exception {
         String yaml = Files.readString(Path.of("samples/petstore.yaml"));
@@ -87,8 +88,12 @@ class TestCaseGenerationTest {
 
         assertThat(cases).anyMatch(c -> "POSITIVE".equals(c.category));
         assertThat(cases).filteredOn(c -> "AUTH".equals(c.category))
-                .extracting(c -> c.authMode)
-                .contains("MISSING", "MALFORMED", "EMPTY");
+                .extracting(c -> c.name)
+                .contains("Missing Authorization header", "Malformed bearer token", "Empty bearer token",
+                        "Wrong auth scheme (Basic)");
+        // Every auth negative expects the configured unauthorized codes.
+        assertThat(cases).filteredOn(c -> "AUTH".equals(c.category))
+                .allMatch(c -> c.expectedStatuses != null && c.expectedStatuses.contains("401"));
     }
 
     @Test
@@ -103,6 +108,30 @@ class TestCaseGenerationTest {
         // An enum violation for 'category' is present.
         assertThat(cases).anyMatch(c ->
                 "category".equals(c.negativeField) && c.name.toLowerCase().contains("enum"));
+    }
+
+    @Test
+    void statusMatcherHandlesListsAndRanges() {
+        assertThat(com.oastest.automation.service.StatusMatcher.matches("200,201,202,204", 201)).isTrue();
+        assertThat(com.oastest.automation.service.StatusMatcher.matches("400-499", 422)).isTrue();
+        assertThat(com.oastest.automation.service.StatusMatcher.matches("400,401,403,429", 500)).isFalse();
+        assertThat(com.oastest.automation.service.StatusMatcher.matches("100-499", 503)).isFalse();
+        assertThat(com.oastest.automation.service.StatusMatcher.matches("200, 201 , 400-404", 404)).isTrue();
+    }
+
+    @Test
+    void generatesRobustnessAndBoundaryCases() throws Exception {
+        OpenAPI api = loadSample();
+        List<TestCase> cases = generator.generate(api, List.of("POST /pets"));
+        // Injection / XSS robustness probes expect "no 5xx".
+        assertThat(cases).anyMatch(c -> c.name.toLowerCase().contains("injection"));
+        assertThat(cases).anyMatch(c -> "no 5xx (handled)".equals(c.expectedStatusFamily));
+        // Boundary-valid cases expect success codes.
+        assertThat(cases).anyMatch(c -> c.name.toLowerCase().contains("boundary")
+                && c.expectedStatuses.contains("200"));
+        // Wrong-root-type and extra-field cases exist.
+        assertThat(cases).anyMatch(c -> c.name.contains("Wrong root type"));
+        assertThat(cases).anyMatch(c -> c.name.contains("Unexpected extra field"));
     }
 
     @Test

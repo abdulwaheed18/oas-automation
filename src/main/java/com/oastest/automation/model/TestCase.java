@@ -44,22 +44,26 @@ public class TestCase {
 
     /**
      * How the Authorization header is handled:
-     * VALID   - attach the bearer token supplied at execution time,
-     * MISSING - send no Authorization header,
-     * MALFORMED - send a clearly invalid bearer token,
-     * EMPTY   - send "Authorization: Bearer " with an empty value,
-     * NONE    - endpoint is not secured, no auth involved.
+     * VALID    - attach the bearer token supplied at execution time,
+     * MISSING  - send no Authorization header (secured endpoint, deliberately omitted),
+     * NONE     - endpoint is not secured, no auth involved,
+     * OVERRIDE - send {@link #authorization} verbatim as the Authorization header.
      */
     public String authMode = "VALID";
 
-    // ---- Expectation ----
+    /** Literal Authorization header value, used only when {@link #authMode} is OVERRIDE. */
+    public String authorization;
 
-    /** Expected HTTP status family the gateway SHOULD return, e.g. "4xx", "2xx". */
+    // ---- Expectation (editable from the UI) ----
+
+    /** Expected HTTP status family the gateway SHOULD return, e.g. "4xx (reject)". */
     public String expectedStatusFamily;
 
-    /** Lower/upper bound (inclusive) of the acceptable status range for a PASS. */
-    public int expectedMin;
-    public int expectedMax;
+    /**
+     * Accepted status codes for a PASS, as a comma-separated list of codes and/or inclusive ranges,
+     * e.g. {@code "400,401,403,422,429"} or {@code "400-499"}. Fully editable per case in the UI.
+     */
+    public String expectedStatuses;
 
     /** Plain-language statement of what a correct gateway does. */
     public String expectedOutcome;

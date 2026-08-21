@@ -42,14 +42,33 @@ with **exactly one** thing made invalid — so a failure points at a single root
 
 | Area | Cases generated |
 |------|-----------------|
-| **Auth** (bearer / JWT) | valid baseline, missing header, malformed token, empty token |
-| **Headers** (required) | missing; plus type / enum / pattern / length / format violations |
-| **Query params** (required) | missing; plus type / enum / range / length / format violations |
-| **Path params** | type / format / range violations |
-| **Request body** | missing body, malformed JSON, missing each required field, `null` for required field, wrong type, enum violation, pattern (with special characters), min/max length, min/max value |
+| **Auth** (bearer / JWT) | valid baseline, missing header, malformed token, empty token, wrong scheme (Basic), well-formed JWT with a bad signature, injection string as token |
+| **Headers** (required) | missing; type / enum / pattern / length / format violations; SQL-injection & XSS robustness probes |
+| **Query params** (required) | missing; type / enum / range / length / format violations; numeric overflow; boundary-valid (min/max); injection & XSS probes |
+| **Path params** | type / format / range violations; path-traversal, injection & XSS probes |
+| **Request body** | missing body, malformed JSON, wrong root type (array/string for object), empty `{}`, missing each required field, `null` for required field, wrong type, enum, pattern (special chars), min/max length, min/max value, boundary-valid values, unexpected extra field, injection & XSS probes |
 
-Each negative case expects the gateway to respond with a **4xx** (auth cases expect **401/403**). If
-the gateway returns **2xx**, the case **FAILS** — the gateway let an invalid request through.
+Each case carries an **expected set of status codes** (see below). Validation negatives expect a
+**4xx**; auth negatives expect **401/403**; robustness probes (injection/XSS/traversal) expect
+**anything but a 5xx**. If the gateway returns something outside the expected set — most importantly a
+**2xx** for an invalid request — the case **FAILS**: the gateway did not enforce the contract.
+
+### Expected status codes — configurable & editable
+
+Defaults live in [`application.properties`](src/main/resources/application.properties) and are also
+**editable per run from the UI** (screen 3). Each value is a comma-separated list of codes and/or
+inclusive ranges — e.g. `200,201,202,204`, `400-499`, or `400,401,403,422,429`:
+
+```properties
+oas.testing.success-codes=200,201,202,204
+oas.testing.reject-codes=400,401,403,404,405,406,409,415,422,429,499
+oas.testing.auth-reject-codes=401,403
+oas.testing.robustness-codes=100-499
+```
+
+On screen 3 you can change these defaults and **Apply** them to all matching cases, **or override the
+expected codes on any single case**. You can also **edit the request body, headers and the bearer
+override** of any individual case before executing — expand the case to reveal the editable fields.
 
 > The **positive baseline** case is your sanity check: if it fails (e.g. wrong base URL or an
 > expired token), the other results are unreliable — the report calls this out.
@@ -144,6 +163,7 @@ samples/petstore.yaml                  # demo spec
 | Method & path | Purpose |
 |---|---|
 | `GET /api/branding` | branding values for the UI |
+| `GET /api/settings` | default expected-status codes for the UI |
 | `POST /api/spec/parse` (multipart) | parse a spec, return endpoints + `sessionId` |
 | `POST /api/testcases/generate` (JSON) | generate cases for selected endpoint keys |
 | `POST /api/execute` (JSON) | run cases against a target, return results |
