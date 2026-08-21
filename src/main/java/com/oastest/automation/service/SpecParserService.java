@@ -53,7 +53,7 @@ public class SpecParserService {
             for (Map.Entry<PathItem.HttpMethod, Operation> opEntry : item.readOperationsMap().entrySet()) {
                 String method = opEntry.getKey().name();
                 Operation op = opEntry.getValue();
-                boolean secured = resolveSecured(op, globallySecured);
+                boolean secured = resolveSecured(op, globallySecured) || hasAuthHeaderParam(op, item);
                 boolean hasBody = op.getRequestBody() != null;
                 String summary = op.getSummary() != null ? op.getSummary()
                         : (op.getDescription() != null ? op.getDescription() : "");
@@ -61,6 +61,19 @@ public class SpecParserService {
             }
         }
         return endpoints;
+    }
+
+    private boolean hasAuthHeaderParam(Operation op, PathItem item) {
+        return authHeaderIn(op.getParameters()) || authHeaderIn(item.getParameters());
+    }
+
+    private boolean authHeaderIn(java.util.List<io.swagger.v3.oas.models.parameters.Parameter> params) {
+        if (params == null) {
+            return false;
+        }
+        return params.stream().anyMatch(p ->
+                "header".equals(p.getIn()) && p.getName() != null
+                        && "authorization".equalsIgnoreCase(p.getName().trim()));
     }
 
     private boolean resolveSecured(Operation op, boolean globallySecured) {

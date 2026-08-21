@@ -111,6 +111,44 @@ class TestCaseGenerationTest {
     }
 
     @Test
+    void authorizationHeaderParamIsTreatedAsAuthNotSampled() throws Exception {
+        // A spec that declares Authorization as a plain header parameter (no securitySchemes).
+        String yaml = """
+                openapi: 3.0.3
+                info: { title: HdrAuth, version: 1.0.0 }
+                paths:
+                  /ping:
+                    get:
+                      parameters:
+                        - name: Authorization
+                          in: header
+                          required: true
+                          schema: { type: string }
+                      responses:
+                        '200': { description: OK }
+                """;
+        OpenAPI api = parser.parse(yaml).getOpenAPI();
+
+        // The endpoint should be flagged secured because of the Authorization header param.
+        assertThat(parser.listEndpoints(api)).allMatch(e -> e.secured);
+
+        List<TestCase> cases = generator.generate(api, List.of("GET /ping"));
+
+        // The positive baseline must inject the bearer token (authMode VALID), and must NOT put a
+        // sampled "Authorization: sample" header.
+        TestCase positive = cases.stream().filter(c -> "POSITIVE".equals(c.category)).findFirst().orElseThrow();
+        assertThat(positive.authMode).isEqualTo("VALID");
+        assertThat(positive.headers).doesNotContainKey("Authorization");
+
+        // Auth negatives must be generated even though there was no securityScheme.
+        assertThat(cases).anyMatch(c -> "AUTH".equals(c.category) && "Missing Authorization header".equals(c.name));
+
+        // No generic HEADER case should target the Authorization header.
+        assertThat(cases).noneMatch(c -> "HEADER".equals(c.category)
+                && "Authorization".equalsIgnoreCase(c.negativeField));
+    }
+
+    @Test
     void statusMatcherHandlesListsAndRanges() {
         assertThat(com.oastest.automation.service.StatusMatcher.matches("200,201,202,204", 201)).isTrue();
         assertThat(com.oastest.automation.service.StatusMatcher.matches("400-499", 422)).isTrue();

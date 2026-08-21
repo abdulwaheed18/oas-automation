@@ -48,6 +48,12 @@ public class TestCaseGeneratorService {
         this.props = props;
     }
 
+    /** True for a header parameter that carries the Authorization/bearer token. */
+    private boolean isAuthHeader(Parameter p) {
+        return "header".equals(p.getIn()) && p.getName() != null
+                && "authorization".equalsIgnoreCase(p.getName().trim());
+    }
+
     /** Expectation class for a case; maps to a configurable set of accepted status codes. */
     private enum Expect { SUCCESS, REJECT, AUTH_REJECT, NO_5XX }
 
@@ -89,9 +95,12 @@ public class TestCaseGeneratorService {
 
     private void generateForOperation(String method, String path, PathItem pathItem, Operation op,
                                       boolean globallySecured, List<TestCase> sink, int[] counter) {
-        boolean secured = op.getSecurity() != null ? !op.getSecurity().isEmpty() : globallySecured;
         List<Parameter> params = mergeParameters(pathItem, op);
         BodyInfo body = resolveBody(op);
+        boolean schemeSecured = op.getSecurity() != null ? !op.getSecurity().isEmpty() : globallySecured;
+        // Also treat an explicitly-declared "Authorization" header parameter as the auth slot, so the
+        // bearer token gets injected there instead of a sample value.
+        boolean secured = schemeSecured || params.stream().anyMatch(this::isAuthHeader);
 
         // 1. Positive baseline — everything valid.
         TestCase positive = base(method, path, "POSITIVE", "Valid baseline request", null,
@@ -120,6 +129,9 @@ public class TestCaseGeneratorService {
 
         // 3. Parameter negatives (headers, query, path) — one bad param per case.
         for (Parameter p : params) {
+            if (isAuthHeader(p)) {
+                continue; // handled by the auth cases above, not as a generic header
+            }
             String in = p.getIn();
             String name = p.getName();
             Schema<?> schema = p.getSchema();
@@ -248,7 +260,9 @@ public class TestCaseGeneratorService {
         c.authMode = secured ? "VALID" : "NONE";
         c.requestPath = buildPath(path, validPathValues(params), includedQuery(params, null));
         for (Parameter p : params) {
-            if ("header".equals(p.getIn()) && Boolean.TRUE.equals(p.getRequired())) {
+            // The Authorization header is populated by the auth logic (a real Bearer token or an
+            // override) — never with a schema sample value.
+            if ("header".equals(p.getIn()) && Boolean.TRUE.equals(p.getRequired()) && !isAuthHeader(p)) {
                 c.headers.put(p.getName(), String.valueOf(SchemaSampler.valid(p.getSchema())));
             }
         }
