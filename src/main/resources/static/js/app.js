@@ -10,6 +10,8 @@ const state = {
     parseResult: null,
     cases: [],
     execResult: null,
+    resultFilter: 'ALL',
+    resultSearch: '',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -65,12 +67,34 @@ function wireEvents() {
     $('btnParse').addEventListener('click', doParse);
     $('btnGenerate').addEventListener('click', doGenerate);
     $('btnExecute').addEventListener('click', doExecute);
-    $('btnReport').addEventListener('click', downloadReport);
     $('btnRestart').addEventListener('click', () => location.reload());
     $('selectAll').addEventListener('click', () => setAllEndpoints(true));
     $('selectNone').addEventListener('click', () => setAllEndpoints(false));
-    $('resultFilter').addEventListener('change', renderResults);
     $('btnApplyCodes').addEventListener('click', applyCodesToCases);
+
+    // Results: filter chips + search
+    $('filterChips').addEventListener('click', (e) => {
+        const chip = e.target.closest('.chip');
+        if (!chip) return;
+        document.querySelectorAll('#filterChips .chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        state.resultFilter = chip.dataset.filter;
+        renderResults();
+    });
+    $('resultSearch').addEventListener('input', (e) => { state.resultSearch = e.target.value.toLowerCase(); renderResults(); });
+
+    // Download dropdown
+    const dd = $('btnDownload').parentElement;
+    $('btnDownload').addEventListener('click', (e) => { e.stopPropagation(); dd.classList.toggle('open'); });
+    document.addEventListener('click', () => dd.classList.remove('open'));
+    $('downloadMenu').addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-fmt]');
+        if (!b) return;
+        dd.classList.remove('open');
+        if (b.dataset.fmt === 'html') downloadHtml();
+        else if (b.dataset.fmt === 'csv') downloadCsv();
+        else if (b.dataset.fmt === 'pdf') downloadPdf();
+    });
 
     document.querySelectorAll('[data-goto]').forEach(btn =>
         btn.addEventListener('click', () => showStep(parseInt(btn.dataset.goto, 10))));
@@ -81,6 +105,7 @@ function wireEvents() {
 /* ------------------------------------------------------------------ */
 function showStep(n) {
     for (let i = 1; i <= 4; i++) $('panel-' + i).classList.toggle('hidden', i !== n);
+    document.querySelector('main').classList.toggle('wide', n === 4);
     document.querySelectorAll('.stepper .step').forEach(s => {
         const step = parseInt(s.dataset.step, 10);
         s.classList.toggle('active', step === n);
@@ -378,11 +403,30 @@ async function doExecute() {
 /* ------------------------------------------------------------------ */
 function renderSummary() {
     const r = state.execResult;
+    const p = state.parseResult;
+    $('resultsMeta').textContent =
+        `${p.apiName}${p.apiVersion ? ' · ' + p.apiVersion : ''} — ${r.total} cases against ${r.targetBaseUrl} · ${new Date(r.executedAtEpochMs).toLocaleString()}`;
+
     $('summaryCards').innerHTML = `
         <div class="sc total"><div class="n">${r.total}</div><div class="l">Total</div></div>
         <div class="sc pass"><div class="n">${r.passed}</div><div class="l">Passed</div></div>
         <div class="sc fail"><div class="n">${r.failed}</div><div class="l">Failed</div></div>
         <div class="sc error"><div class="n">${r.errored}</div><div class="l">Errors</div></div>`;
+
+    const pct = r.total ? Math.round((r.passed / r.total) * 100) : 0;
+    const seg = (n) => r.total ? (n / r.total * 100) : 0;
+    $('passRate').innerHTML = `
+        <div class="pr-top"><span class="pr-pct">${pct}%</span><span class="pr-lbl">Pass rate</span></div>
+        <div class="pr-bar">
+            <div class="seg pass" style="width:${seg(r.passed)}%"></div>
+            <div class="seg fail" style="width:${seg(r.failed)}%"></div>
+            <div class="seg error" style="width:${seg(r.errored)}%"></div>
+        </div>
+        <div class="pr-legend">
+            <span><b>${r.passed}</b> passed</span>
+            <span><b>${r.failed}</b> failed</span>
+            <span><b>${r.errored}</b> errors</span>
+        </div>`;
 
     const posFailed = r.results.some(x => x.category === 'POSITIVE' && x.verdict !== 'PASS');
     const banner = $('resultBanner');
@@ -395,55 +439,151 @@ function renderSummary() {
     }
 }
 
+function filteredResults() {
+    const f = state.resultFilter, q = state.resultSearch;
+    return state.execResult.results.filter(r => {
+        if (f !== 'ALL' && r.verdict !== f) return false;
+        if (q) {
+            const hay = (r.name + ' ' + r.category + ' ' + r.method + ' ' + r.endpointPath + ' ' + (r.message || '')).toLowerCase();
+            if (!hay.includes(q)) return false;
+        }
+        return true;
+    });
+}
+
 function renderResults() {
-    const filter = $('resultFilter').value;
-    const list = $('resultList');
-    list.innerHTML = '';
-    state.execResult.results
-        .filter(r => filter === 'ALL' || r.verdict === filter)
-        .forEach(r => {
-            const div = document.createElement('div');
-            div.className = 'result ' + r.verdict;
-            div.innerHTML = `
-                <div class="result-head">
-                    <span class="verdict ${r.verdict}">${r.verdict}</span>
-                    <span class="cat cat-${r.category}">${r.category}</span>
-                    <span class="result-name">${escapeHtml(r.name)}</span>
-                    <span class="result-status">${r.actualStatus || '—'} · ${r.latencyMs}ms</span>
+    const rows = filteredResults();
+    const body = $('resultBody');
+    body.innerHTML = '';
+    $('resultCount').textContent = `${rows.length} of ${state.execResult.results.length} shown`;
+
+    if (rows.length === 0) {
+        body.innerHTML = '<tr><td colspan="7"><p class="sub" style="padding:16px">No results match this filter.</p></td></tr>';
+        return;
+    }
+
+    rows.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.className = 'row ' + r.verdict;
+        tr.innerHTML = `
+            <td><span class="verdict ${r.verdict}">${r.verdict}</span></td>
+            <td><span class="cat cat-${r.category}">${r.category}</span></td>
+            <td class="c-ep"><span class="method m-${r.method}">${r.method}</span>${escapeHtml(r.endpointPath)}</td>
+            <td class="c-name">${escapeHtml(r.name)}</td>
+            <td class="c-exp">${escapeHtml(r.expectedStatusFamily || '')}</td>
+            <td class="c-actual">${r.actualStatus || '—'}</td>
+            <td>${r.latencyMs}ms</td>`;
+
+        const detail = document.createElement('tr');
+        detail.className = 'detail-row ' + r.verdict;
+        detail.innerHTML = `
+            <td colspan="7"><div class="detail-inner">
+                <div class="detail-msg"><b>Verdict:</b> ${escapeHtml(r.message || '')}</div>
+                <div class="io-cols">
+                    <div class="io-col">
+                        <div class="io-head"><span class="k">▶ Request sent (cURL)</span>
+                            <button class="btn ghost small copy-btn" data-copy="${escapeAttr(r.curl || '')}">Copy</button></div>
+                        <pre class="req">${escapeHtml(r.curl || '(not sent)')}</pre>
+                    </div>
+                    <div class="io-col">
+                        <div class="io-head"><span class="k">◀ Response received</span>
+                            <span class="io-status">HTTP ${r.actualStatus || '—'} · ${r.latencyMs}ms</span></div>
+                        <pre class="resp-hdr">${escapeHtml(r.responseHeaders || '(no headers)')}</pre>
+                        <pre>${escapeHtml(r.responseSnippet || '(empty body)')}</pre>
+                    </div>
                 </div>
-                <div class="result-detail">
-                    <div class="row"><span class="k">Endpoint</span> ${r.method} ${escapeHtml(r.endpointPath)}</div>
-                    <div class="row"><span class="k">Expected</span> ${escapeHtml(r.expectedStatusFamily || '')}</div>
-                    <div class="row"><span class="k">Verdict</span> ${escapeHtml(r.message || '')}</div>
-                    <div class="io-head"><span class="k">▶ Request sent (cURL)</span>
-                        <button class="btn ghost small copy-btn" data-copy="${escapeAttr(r.curl || '')}">Copy</button></div>
-                    <pre class="req">${escapeHtml(r.curl || '(not sent)')}</pre>
-                    <div class="io-head"><span class="k">◀ Response received</span>
-                        <span class="io-status">HTTP ${r.actualStatus || '—'} · ${r.latencyMs}ms</span></div>
-                    <pre class="resp-hdr">${escapeHtml(r.responseHeaders || '(no headers)')}</pre>
-                    <pre>${escapeHtml(r.responseSnippet || '(empty body)')}</pre>
-                </div>`;
-            div.querySelector('.result-head').addEventListener('click', (e) => {
-                if (e.target.classList.contains('copy-btn')) return;
-                div.classList.toggle('open');
-            });
-            const copyBtn = div.querySelector('.copy-btn');
-            if (copyBtn) copyBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                navigator.clipboard.writeText(copyBtn.dataset.copy).then(() => {
-                    const t = copyBtn.textContent; copyBtn.textContent = 'Copied!';
-                    setTimeout(() => copyBtn.textContent = t, 1200);
-                }).catch(() => {});
-            });
-            list.appendChild(div);
+            </div></td>`;
+
+        tr.addEventListener('click', () => {
+            const open = tr.classList.toggle('open');
+            detail.classList.toggle('open', open);
         });
-    if (list.children.length === 0) list.innerHTML = '<p class="sub">No results for this filter.</p>';
+        const copyBtn = detail.querySelector('.copy-btn');
+        if (copyBtn) copyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(copyBtn.dataset.copy).then(() => {
+                const t = copyBtn.textContent; copyBtn.textContent = 'Copied!';
+                setTimeout(() => copyBtn.textContent = t, 1200);
+            }).catch(() => {});
+        });
+
+        body.appendChild(tr);
+        body.appendChild(detail);
+    });
 }
 
 /* ------------------------------------------------------------------ */
-/*  Report download                                                    */
+/*  Report download (HTML / CSV / PDF)                                 */
 /* ------------------------------------------------------------------ */
-function downloadReport() {
+function reportFileBase() {
+    return `oas-report-${(state.parseResult.apiName || 'api').replace(/\W+/g, '_')}-${Date.now()}`;
+}
+
+function triggerDownload(content, mime, filename) {
+    const blob = new Blob([content], { type: mime });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { a.remove(); URL.revokeObjectURL(a.href); }, 500);
+}
+
+function downloadHtml() {
+    triggerDownload(buildReportHtml(), 'text/html', reportFileBase() + '.html');
+}
+
+function downloadCsv() {
+    const p = state.parseResult, r = state.execResult;
+    const esc = (v) => {
+        const s = String(v == null ? '' : v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const meta = [
+        ['API Name', p.apiName], ['API Version', p.apiVersion || ''],
+        ['Spec Title', p.specTitle || ''], ['Spec Version', p.specVersion || ''],
+        ['Target Base URL', r.targetBaseUrl], ['Executed', new Date(r.executedAtEpochMs).toISOString()],
+        ['Total', r.total], ['Passed', r.passed], ['Failed', r.failed], ['Errors', r.errored],
+        ['Notes', p.note || ''],
+    ].map(row => row.map(esc).join(',')).join('\n');
+
+    const header = ['ID', 'Verdict', 'Category', 'Method', 'Endpoint', 'Test case', 'Negative field',
+        'Expected', 'Expected codes', 'Actual', 'Latency (ms)', 'Request URL', 'Message', 'cURL'];
+    const lines = r.results.map(x => [
+        x.id, x.verdict, x.category, x.method, x.endpointPath, x.name, x.negativeField || '',
+        x.expectedStatusFamily || '', x.expectedStatuses || '', x.actualStatus, x.latencyMs,
+        x.requestUrl || '', x.message || '', x.curl || '',
+    ].map(esc).join(','));
+
+    const csv = '﻿' + meta + '\n\n' + header.map(esc).join(',') + '\n' + lines.join('\n');
+    triggerDownload(csv, 'text/csv', reportFileBase() + '.csv');
+}
+
+function downloadPdf() {
+    // Print the HTML report via a hidden iframe (browser "Save as PDF"). No external libraries.
+    const html = buildReportHtml(true);
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    iframe.onload = () => {
+        setTimeout(() => {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+            setTimeout(() => iframe.remove(), 1000);
+        }, 250);
+    };
+}
+
+function buildReportHtml(forPrint) {
     const p = state.parseResult, r = state.execResult, b = state.branding || {};
     const rows = r.results.map(x => `
         <tr class="${x.verdict}">
@@ -488,9 +628,14 @@ tr.ERROR td:nth-child(2){color:#d97706;font-weight:700;}
 .repro .lbl{font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;margin:8px 0 3px;}
 .repro pre{background:#0f172a;color:#e2e8f0;padding:9px 11px;border-radius:7px;font-size:12px;white-space:pre-wrap;word-break:break-word;overflow-x:auto;margin:0;}
 .repro pre.req{background:#10231b;color:#b9f6ca;}
+.hdrbar{background:${b.primaryColor || '#4f46e5'};color:#fff;padding:20px 24px;border-radius:12px;margin-bottom:8px;}
+.hdrbar h1{margin:0;color:#fff;font-size:22px;} .hdrbar .sub{color:rgba(255,255,255,.85);font-size:13px;margin-top:3px;}
+@media print { body{margin:0;} .repro{page-break-inside:avoid;} table{font-size:11px;} .hdrbar{border-radius:0;} @page{margin:14mm;} }
 </style></head><body>
-<h1>${escapeHtml(b.appName || 'OAS Automation Test Suite')} — Report</h1>
-<div class="muted">${escapeHtml(b.company || '')} · Generated ${new Date().toLocaleString()}</div>
+<div class="hdrbar">
+    <h1>${escapeHtml(b.appName || 'OAS Automation Test Suite')} — Test Report</h1>
+    <div class="sub">${escapeHtml(b.company || '')} · Generated ${new Date().toLocaleString()}</div>
+</div>
 <div class="meta">
     <div><b>API Name:</b> ${escapeHtml(p.apiName)}</div>
     <div><b>API Version:</b> ${escapeHtml(p.apiVersion || '—')}</div>
@@ -514,13 +659,7 @@ tr.ERROR td:nth-child(2){color:#d97706;font-weight:700;}
 ${repro ? '<h3>Reproduction — failed &amp; errored cases (request / response)</h3>' + repro : ''}
 </body></html>`;
 
-    const blob = new Blob([html], { type: 'text/html' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `oas-report-${(p.apiName || 'api').replace(/\W+/g, '_')}-${Date.now()}.html`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    return html;
 }
 
 /* ------------------------------------------------------------------ */

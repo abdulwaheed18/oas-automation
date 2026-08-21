@@ -14,6 +14,9 @@ public class TestResult {
     public String expectedOutcome;
     public String expectedStatusFamily;
 
+    /** The accepted status codes (list/range string) the case was evaluated against. */
+    public String expectedStatuses;
+
     /** Actual HTTP status returned by the target (0 if the call itself errored). */
     public int actualStatus;
 

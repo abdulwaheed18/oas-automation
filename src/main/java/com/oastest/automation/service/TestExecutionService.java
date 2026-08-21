@@ -64,6 +64,7 @@ public class TestExecutionService {
         r.negativeField = tc.negativeField;
         r.expectedOutcome = tc.expectedOutcome;
         r.expectedStatusFamily = tc.expectedStatusFamily;
+        r.expectedStatuses = tc.expectedStatuses;
         r.requestUrl = base + tc.requestPath;
 
         long start = System.currentTimeMillis();

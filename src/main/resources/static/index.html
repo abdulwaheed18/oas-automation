@@ -131,24 +131,58 @@
 
     <!-- ============ STEP 4 ============ -->
     <section class="panel hidden" id="panel-4">
-        <h2>Results</h2>
-        <div class="banner" id="resultBanner"></div>
-        <div class="summary-cards" id="summaryCards"></div>
-        <div class="toolbar">
-            <label class="filter">Filter:
-                <select id="resultFilter">
-                    <option value="ALL">All</option>
-                    <option value="FAIL">Failures only</option>
-                    <option value="PASS">Passes only</option>
-                    <option value="ERROR">Errors only</option>
-                </select>
-            </label>
-            <button class="btn primary" id="btnReport">⬇ Download report (HTML)</button>
+        <div class="results-header">
+            <div>
+                <h2 id="resultsTitle">Results</h2>
+                <p class="sub" id="resultsMeta"></p>
+            </div>
+            <div class="results-actions">
+                <button class="btn ghost" data-goto="3">← Test cases</button>
+                <button class="btn ghost" id="btnRestart">Start over</button>
+                <div class="dropdown">
+                    <button class="btn primary" id="btnDownload">⬇ Download report ▾</button>
+                    <div class="dropdown-menu" id="downloadMenu">
+                        <button data-fmt="html">📄 HTML report</button>
+                        <button data-fmt="csv">📊 CSV spreadsheet</button>
+                        <button data-fmt="pdf">🧾 PDF (print)</button>
+                    </div>
+                </div>
+            </div>
         </div>
-        <div id="resultList" class="result-list"></div>
-        <div class="actions">
-            <button class="btn ghost" data-goto="3">← Back to test cases</button>
-            <button class="btn ghost" id="btnRestart">Start over</button>
+
+        <div class="banner" id="resultBanner"></div>
+
+        <div class="results-grid">
+            <div class="summary-cards" id="summaryCards"></div>
+            <div class="passrate" id="passRate"></div>
+        </div>
+
+        <div class="results-toolbar">
+            <input type="text" id="resultSearch" class="search" placeholder="🔎 Search by name, endpoint, category…"/>
+            <div class="chips" id="filterChips">
+                <button class="chip active" data-filter="ALL">All</button>
+                <button class="chip" data-filter="FAIL">Failed</button>
+                <button class="chip" data-filter="PASS">Passed</button>
+                <button class="chip" data-filter="ERROR">Errors</button>
+            </div>
+            <span class="count" id="resultCount"></span>
+        </div>
+
+        <div class="table-wrap">
+            <table class="results-table" id="resultsTable">
+                <thead>
+                    <tr>
+                        <th style="width:70px">Verdict</th>
+                        <th style="width:90px">Category</th>
+                        <th style="width:170px">Endpoint</th>
+                        <th>Test case</th>
+                        <th style="width:140px">Expected</th>
+                        <th style="width:80px">Actual</th>
+                        <th style="width:80px">Latency</th>
+                    </tr>
+                </thead>
+                <tbody id="resultBody"></tbody>
+            </table>
         </div>
     </section>
 </main>

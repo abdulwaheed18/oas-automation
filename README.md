@@ -27,10 +27,13 @@ gateway failed to reject an invalid request.
 3. **Screen 3 — Test cases & run.** The tool generates negative test cases for the selected
    endpoints (see [How test cases are generated](#how-test-cases-are-generated)). Enter the
    **target base URL** and a **bearer token**, then execute.
-4. **Screen 4 — Results.** Per-case **PASS / FAIL / ERROR** with expected vs. actual status, the
-   response body, latency, and a summary. **FAIL** means the gateway did *not* enforce the contract
-   (e.g. it accepted an invalid request). Download a self-contained **HTML report** that also
-   includes the notes you entered on screen 1.
+4. **Screen 4 — Results.** A full-width results dashboard: summary cards, a pass-rate bar, a
+   searchable/filterable table of every case with **PASS / FAIL / ERROR**, expected vs. actual
+   status and latency. Expand any row to see the **exact request sent (cURL)** and the **response
+   received** (status, headers, body) side by side. **FAIL** means the gateway did *not* enforce the
+   contract (e.g. it accepted an invalid request). Download the report as **HTML, CSV, or PDF** — all
+   include the notes you entered on screen 1, and the HTML/PDF include a reproduction appendix with
+   the cURL + response for each failed case.
 
 ---
 

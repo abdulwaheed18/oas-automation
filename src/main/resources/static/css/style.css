@@ -94,7 +94,8 @@ body {
 .step.done span::after { font-size: 12px; }
 
 /* ---------------- Layout ---------------- */
-main { max-width: 1000px; width: 100%; margin: 28px auto; padding: 0 22px; flex: 1; }
+main { max-width: 1000px; width: 100%; margin: 28px auto; padding: 0 22px; flex: 1; transition: max-width .3s ease; }
+main.wide { max-width: 1480px; }
 
 .panel {
     background: var(--card); border: 1px solid var(--border);
@@ -247,8 +248,43 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
     background: #f1f3f9; color: #475569; font-family: "Cascadia Code", Consolas, monospace;
 }
 
-/* ---------------- Summary + results ---------------- */
-.summary-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+/* ---------------- Results header ---------------- */
+.results-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.results-header h2 { margin: 0 0 3px; }
+.results-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.dropdown { position: relative; }
+.dropdown-menu {
+    position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
+    background: #fff; border: 1px solid var(--border-strong); border-radius: 10px;
+    box-shadow: var(--shadow-lg); padding: 6px; min-width: 190px; display: none;
+}
+.dropdown.open .dropdown-menu { display: block; animation: fadeSlide .16s ease; }
+.dropdown-menu button {
+    display: block; width: 100%; text-align: left; border: none; background: none;
+    padding: 9px 12px; border-radius: 7px; font-size: 13.5px; font-weight: 600; color: var(--text); cursor: pointer;
+}
+.dropdown-menu button:hover { background: var(--accent-soft); color: var(--accent); }
+
+/* ---------------- Summary + pass rate ---------------- */
+.results-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 16px; align-items: stretch; margin-bottom: 18px; }
+.summary-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.passrate {
+    border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; background: #fff;
+    box-shadow: var(--shadow-sm); display: flex; flex-direction: column; justify-content: center;
+}
+.passrate .pr-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+.passrate .pr-pct { font-size: 26px; font-weight: 800; }
+.passrate .pr-lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.pr-bar { height: 12px; border-radius: 7px; background: var(--fail-soft); overflow: hidden; display: flex; }
+.pr-bar .seg { height: 100%; }
+.pr-bar .seg.pass { background: var(--pass); }
+.pr-bar .seg.fail { background: var(--fail); }
+.pr-bar .seg.error { background: var(--error); }
+.pr-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+.pr-legend b { color: var(--text); }
+
+.old-summary-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
 .sc {
     border: 1px solid var(--border); border-radius: 12px; padding: 18px; text-align: center;
     background: #fff; box-shadow: var(--shadow-sm);
@@ -266,6 +302,58 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 }
 .banner.show { display: block; }
 .banner.warn { background: var(--error-soft); color: #92400e; border: 1px solid #f3ddb4; }
+
+/* ---------------- Results toolbar ---------------- */
+.results-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; flex-wrap: wrap; }
+.search {
+    width: 320px; max-width: 100%; margin: 0; padding: 9px 13px;
+    border: 1px solid var(--border-strong); border-radius: 9px; font-size: 13.5px; background: #fff;
+}
+.chips { display: flex; gap: 7px; flex-wrap: wrap; }
+.chip {
+    padding: 7px 15px; border: 1px solid var(--border-strong); background: #fff; color: var(--muted);
+    border-radius: 20px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all .15s ease;
+}
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---------------- Results table ---------------- */
+.table-wrap { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-sm); background: #fff; }
+.results-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.results-table thead th {
+    position: sticky; top: 92px; background: #f7f8fb; z-index: 5;
+    text-align: left; padding: 12px 14px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .5px; color: var(--muted); border-bottom: 1px solid var(--border);
+}
+.results-table tbody tr.row { border-top: 1px solid var(--border); cursor: pointer; transition: background .12s ease; }
+.results-table tbody tr.row:hover { background: #f9fafc; }
+.results-table tbody tr.row.open { background: var(--accent-soft); }
+.results-table td { padding: 11px 14px; vertical-align: middle; }
+.results-table td.c-name { font-weight: 600; }
+.results-table td.c-ep { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; color: var(--muted); }
+.results-table td.c-exp { font-family: "Cascadia Code", Consolas, monospace; font-size: 12px; color: var(--muted); }
+.results-table td.c-actual { font-weight: 700; font-family: "Cascadia Code", Consolas, monospace; }
+.results-table tr.row.PASS td.c-actual { color: var(--pass); }
+.results-table tr.row.FAIL td.c-actual { color: var(--fail); }
+.results-table tr.row.ERROR td.c-actual { color: var(--error); }
+.results-table .method { min-width: 44px; margin-right: 6px; }
+
+.detail-row td { padding: 0; background: #fbfcfe; }
+.detail-inner { padding: 6px 16px 18px; display: none; }
+.detail-row.open .detail-inner { display: block; animation: fadeSlide .2s ease; }
+.detail-msg { font-size: 13px; margin: 8px 0 4px; }
+.io-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 6px; }
+.io-col .io-head { margin-top: 6px; }
+.io-col pre {
+    background: #0f172a; color: #e2e8f0; padding: 11px 13px; border-radius: 8px; margin: 6px 0 0;
+    font-size: 12px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    font-family: "Cascadia Code", Consolas, monospace; max-height: 260px;
+}
+.io-col pre.req { background: #10231b; color: #b9f6ca; }
+.io-col pre.resp-hdr { background: #1a1330; color: #d6c8f5; max-height: 130px; }
+.io-col .io-head { display: flex; align-items: center; gap: 10px; }
+.io-col .io-head .k { color: var(--text); font-weight: 700; font-size: 12.5px; }
+.io-col .io-status { margin-left: auto; font-size: 12px; color: var(--muted); font-family: "Cascadia Code", Consolas, monospace; }
 
 .result-list { display: flex; flex-direction: column; gap: 8px; }
 .result {
@@ -327,10 +415,16 @@ textarea { resize: vertical; font-family: "Cascadia Code", Consolas, monospace; 
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+@media (max-width: 980px) {
+    .results-grid { grid-template-columns: 1fr; }
+    .io-cols { grid-template-columns: 1fr; }
+}
 @media (max-width: 760px) {
     .grid-2, .settings-grid { grid-template-columns: 1fr; }
     .summary-cards { grid-template-columns: repeat(2, 1fr); }
     .app-header { flex-direction: column; align-items: flex-start; gap: 8px; }
     .stepper { top: 96px; }
     .hdr-row { grid-template-columns: 1fr; }
+    .results-table thead { display: none; }
+    .results-table td { display: inline-block; }
 }
