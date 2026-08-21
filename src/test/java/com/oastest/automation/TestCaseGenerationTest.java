@@ -188,6 +188,32 @@ class TestCaseGenerationTest {
     }
 
     @Test
+    void uuidFieldGetsValidV4Baseline() throws Exception {
+        String yaml = """
+                openapi: 3.0.3
+                info: { title: Uuid, version: 1.0.0 }
+                paths:
+                  /x:
+                    get:
+                      parameters:
+                        - name: X-Request-Id
+                          in: header
+                          required: true
+                          schema: { type: string, format: uuid }
+                      responses:
+                        '200': { description: OK }
+                """;
+        OpenAPI api = parser.parse(yaml).getOpenAPI();
+        List<TestCase> cases = generator.generate(api, List.of("GET /x"));
+        TestCase positive = cases.stream().filter(c -> "POSITIVE".equals(c.category)).findFirst().orElseThrow();
+        String id = positive.headers.get("X-Request-Id");
+
+        assertThat(id).hasSize(36);
+        // UUID v4: version nibble is 4, variant nibble is 8/9/a/b.
+        assertThat(id).matches("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
+    }
+
+    @Test
     void statusMatcherHandlesListsAndRanges() {
         assertThat(com.oastest.automation.service.StatusMatcher.matches("200,201,202,204", 201)).isTrue();
         assertThat(com.oastest.automation.service.StatusMatcher.matches("400-499", 422)).isTrue();

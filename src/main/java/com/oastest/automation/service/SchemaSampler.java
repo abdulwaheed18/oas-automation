@@ -119,7 +119,8 @@ public final class SchemaSampler {
                 case "email":
                     return "user@example.com";
                 case "uuid":
-                    return "123e4567-e89b-12d3-a456-426614174000";
+                    // Always a valid 36-char UUID v4 (randomUUID() sets version 4 + variant bits).
+                    return java.util.UUID.randomUUID().toString();
                 case "uri":
                 case "url":
                     return "https://example.com/resource";
